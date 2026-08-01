@@ -71,7 +71,7 @@ Layered layout under `sdr_console/`:
 
 - `hal/` — device drivers (mock, Pluto, file playback, scenarios)
 - `dsp/` — numpy/scipy signal processing (dBFS spectrum frames, channelizer)
-- `demod/` — demodulation modes (AM today), baseband IQ to mono audio
+- `demod/` — demodulation modes (AM, N-FM, W-FM, USB, LSB, CW) via `Demodulator` ABC
 - `audio/` — sound card output via `sounddevice`
 - `pipeline/` — worker threads and drop-oldest queues
 - `viz/` — pyqtgraph widgets

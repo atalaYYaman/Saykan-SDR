@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from sdr_console.demod.am import AMDemodulator
 from sdr_console.demod.base import Demodulator
+from sdr_console.demod.factory import default_demodulator_factory
 from sdr_console.dsp.audio import DemodChainPlan, plan_demod_chain
 from sdr_console.dsp.channel import ChannelSpec
 from sdr_console.dsp.channelizer import ChannelizerState, channelize
@@ -23,16 +23,6 @@ logger = logging.getLogger(__name__)
 
 #: Builds a demodulator for an IF rate and a forced audio decimation factor.
 DemodulatorFactory = Callable[[float, int], Demodulator]
-
-
-def default_demodulator_factory(
-    input_rate_hz: float,
-    audio_decimation: int,
-) -> Demodulator:
-    return AMDemodulator(
-        input_rate_hz=input_rate_hz,
-        audio_decimation=audio_decimation,
-    )
 
 
 class DemodWorker:
