@@ -23,7 +23,8 @@ from PyQt6.QtWidgets import (
 
 from sdr_console.config.app_config import AppConfig
 from sdr_console.config.storage import save_config
-from sdr_console.dsp.channel import ChannelSpec
+from sdr_console.dsp.channel import MIN_CHANNEL_BANDWIDTH_HZ, ChannelSpec
+from sdr_console.dsp.channelizer import choose_decimation
 from sdr_console.hal.discovery import scan_devices
 from sdr_console.hal.interface import SDRDeviceInterface
 from sdr_console.hal.registry import (
@@ -40,6 +41,18 @@ from sdr_console.viz.sdr_display import SdrDisplayWidget
 from sdr_console.viz.settings import DisplaySettings
 
 FFT_SIZE_CHOICES: tuple[int, ...] = (512, 1024, 2048, 4096)
+CHANNEL_BANDWIDTH_CHOICES_HZ: tuple[float, ...] = (
+    100_000.0,
+    125_000.0,
+    150_000.0,
+    175_000.0,
+    200_000.0,
+    250_000.0,
+    300_000.0,
+    350_000.0,
+)
+# Rate the demodulation chain will ask for; shown as the resulting IF rate.
+DEMOD_TARGET_RATE_HZ = 48_000.0
 
 
 def format_frequency(freq_hz: float) -> str:
@@ -254,6 +267,18 @@ class MainWindow(QMainWindow):
         for size in FFT_SIZE_CHOICES:
             self._fft_size_combo.addItem(str(size), size)
 
+        self._bandwidth_combo = QComboBox()
+        self._bandwidth_combo.setEditable(True)
+        self._bandwidth_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self._bandwidth_combo.setToolTip(
+            "Pick a preset or type a custom bandwidth in kHz"
+        )
+        for bandwidth_hz in CHANNEL_BANDWIDTH_CHOICES_HZ:
+            self._bandwidth_combo.addItem(f"{bandwidth_hz / 1_000.0:g} kHz", bandwidth_hz)
+        line_edit = self._bandwidth_combo.lineEdit()
+        if line_edit is not None:
+            line_edit.setPlaceholderText("kHz")
+
         self._vfo_label = QLabel()
         self._vfo_label.setToolTip(
             "Click the spectrum or waterfall, or drag the highlighted box, "
@@ -265,6 +290,7 @@ class MainWindow(QMainWindow):
         tuning_form.addRow("Gain mode", self._gain_mode_combo)
         tuning_form.addRow("Sample rate", self._sample_rate_combo)
         tuning_form.addRow("FFT size", self._fft_size_combo)
+        tuning_form.addRow("Bandwidth", self._bandwidth_combo)
         tuning_form.addRow("Listen (VFO)", self._vfo_label)
         root.addWidget(tuning_box)
 
@@ -313,6 +339,10 @@ class MainWindow(QMainWindow):
         self._sample_rate_combo.currentIndexChanged.connect(self._on_sample_rate_changed)
         self._sample_rate_combo.editTextChanged.connect(self._on_sample_rate_edited)
         self._fft_size_combo.currentIndexChanged.connect(self._on_fft_size_changed)
+        self._bandwidth_combo.currentIndexChanged.connect(self._on_bandwidth_changed)
+        bandwidth_edit = self._bandwidth_combo.lineEdit()
+        if bandwidth_edit is not None:
+            bandwidth_edit.editingFinished.connect(self._on_bandwidth_changed)
         self._vmin_spin.valueChanged.connect(self._on_display_levels_changed)
         self._vmax_spin.valueChanged.connect(self._on_display_levels_changed)
 
@@ -325,6 +355,7 @@ class MainWindow(QMainWindow):
             self._sample_rate_combo,
             self._fft_size_combo,
             self._gain_mode_combo,
+            self._bandwidth_combo,
             self._uri_edit,
         )
         for widget in widgets:
@@ -358,15 +389,70 @@ class MainWindow(QMainWindow):
             widget.blockSignals(False)
 
         self._update_gain_spin_enabled()
+        self._sync_bandwidth_combo()
         self._update_vfo_label()
 
     def _update_vfo_label(self) -> None:
         if self._vfo_label is None:
             return
+
+        decimation = choose_decimation(
+            self._device.sample_rate_hz,
+            self._channel.bandwidth_hz,
+            DEMOD_TARGET_RATE_HZ,
+        )
+        if_rate_hz = self._device.sample_rate_hz / decimation
         self._vfo_label.setText(
             f"{format_frequency(self._channel.center_freq_hz)}  "
-            f"(BW {format_frequency(self._channel.bandwidth_hz)})"
+            f"(BW {format_frequency(self._channel.bandwidth_hz)}, "
+            f"IF {format_frequency(if_rate_hz)} / dec {decimation})"
         )
+
+    def _current_bandwidth_hz(self) -> float | None:
+        """Bandwidth from the combo: preset value, or the typed value in kHz."""
+        index = self._bandwidth_combo.currentIndex()
+        text = self._bandwidth_combo.currentText().strip()
+
+        if index >= 0 and text == self._bandwidth_combo.itemText(index):
+            preset = self._bandwidth_combo.itemData(index)
+            if preset is not None:
+                return float(preset)
+
+        cleaned = text.lower().removesuffix("hz").removesuffix("k").strip()
+        try:
+            return float(cleaned) * 1_000.0
+        except ValueError:
+            return None
+
+    def _on_bandwidth_changed(self) -> None:
+        bandwidth_hz = self._current_bandwidth_hz()
+        if bandwidth_hz is None:
+            self._status_label.setText("Bandwidth must be a number in kHz")
+            self._sync_bandwidth_combo()
+            return
+
+        if bandwidth_hz < MIN_CHANNEL_BANDWIDTH_HZ:
+            self._status_label.setText(
+                f"Bandwidth must be at least {MIN_CHANNEL_BANDWIDTH_HZ / 1_000.0:g} kHz"
+            )
+            self._sync_bandwidth_combo()
+            return
+
+        self._set_channel(self._channel.with_bandwidth(bandwidth_hz))
+        self._sync_bandwidth_combo()
+        self._set_idle_or_streaming_status()
+
+    def _sync_bandwidth_combo(self) -> None:
+        """Show the effective bandwidth, which may have been clamped to the band."""
+        bandwidth_hz = self._channel.bandwidth_hz
+        self._bandwidth_combo.blockSignals(True)
+        index = self._bandwidth_combo.findData(bandwidth_hz)
+        if index >= 0:
+            self._bandwidth_combo.setCurrentIndex(index)
+        else:
+            self._bandwidth_combo.setCurrentIndex(-1)
+            self._bandwidth_combo.setEditText(f"{bandwidth_hz / 1_000.0:g} kHz")
+        self._bandwidth_combo.blockSignals(False)
 
     def _set_channel(self, channel: ChannelSpec) -> None:
         """Store the listening channel and mirror it to config and the overlay."""

@@ -15,6 +15,14 @@ from sdr_console.ui.main_window import MainWindow
 pytest.importorskip("pytestqt")
 
 
+def _type_bandwidth(window: MainWindow, text: str) -> None:
+    """Enter a custom bandwidth the way a user would: type, then leave the field."""
+    line_edit = window._bandwidth_combo.lineEdit()
+    assert line_edit is not None
+    window._bandwidth_combo.setEditText(text)
+    line_edit.editingFinished.emit()
+
+
 @pytest.fixture
 def window(qtbot, tmp_config_path: Path):
     config = AppConfig.default()
@@ -80,6 +88,52 @@ def test_center_frequency_change_moves_the_display_axis(window: MainWindow) -> N
     assert window._channel.center_freq_hz == window._config.listen_freq_hz
     low_hz = 120_000_000.0 - window._device.sample_rate_hz / 2.0
     assert window._channel.center_freq_hz >= low_hz
+
+
+def test_bandwidth_preset_resizes_the_overlay_box(window: MainWindow) -> None:
+    index = window._bandwidth_combo.findData(125_000.0)
+    window._bandwidth_combo.setCurrentIndex(index)
+
+    assert window._channel.bandwidth_hz == 125_000.0
+    assert window._config.channel_bandwidth_hz == 125_000.0
+    low_hz, high_hz = window._display._overlays[0].region.getRegion()
+    assert high_hz - low_hz == pytest.approx(125_000.0)
+
+
+def test_custom_bandwidth_is_read_as_kilohertz(window: MainWindow) -> None:
+    _type_bandwidth(window, "42.5 kHz")
+
+    assert window._channel.bandwidth_hz == pytest.approx(42_500.0)
+    low_hz, high_hz = window._display._overlays[1].region.getRegion()
+    assert high_hz - low_hz == pytest.approx(42_500.0)
+
+
+def test_invalid_bandwidth_text_is_rejected_and_reverted(window: MainWindow) -> None:
+    original_bandwidth_hz = window._channel.bandwidth_hz
+
+    _type_bandwidth(window, "not a number")
+
+    assert window._channel.bandwidth_hz == original_bandwidth_hz
+    assert "kHz" in window._status_label.text()
+    assert "kHz" in window._bandwidth_combo.currentText()
+
+
+def test_bandwidth_wider_than_the_band_is_clamped(window: MainWindow) -> None:
+    _type_bandwidth(window, "999999 kHz")
+
+    assert window._channel.bandwidth_hz == pytest.approx(window._device.sample_rate_hz)
+    assert "2048" in window._bandwidth_combo.currentText()
+
+
+def test_vfo_label_reports_the_resulting_if_rate(window: MainWindow) -> None:
+    index = window._bandwidth_combo.findData(200_000.0)
+    window._bandwidth_combo.setCurrentIndex(index)
+
+    assert window._vfo_label is not None
+    text = window._vfo_label.text()
+    assert "BW 200.000 kHz" in text
+    assert "IF 204.800 kHz" in text
+    assert "dec 10" in text
 
 
 def test_close_event_persists_listening_channel(
