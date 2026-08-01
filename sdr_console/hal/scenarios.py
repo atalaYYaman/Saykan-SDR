@@ -152,6 +152,96 @@ class BurstMockDevice(MockSDRDevice):
         return gated
 
 
+@dataclass(frozen=True)
+class AMSignalSpec:
+    """Amplitude-modulated carrier whose envelope carries one audio tone."""
+
+    carrier_freq_hz: float
+    audio_freq_hz: float = 1_000.0
+    modulation_index: float = 0.5
+    relative_amplitude: float = 0.8
+
+
+class AMMockDevice(MockSDRDevice):
+    """Mock device emitting an AM-modulated carrier, for demodulation tests."""
+
+    def __init__(
+        self,
+        am: AMSignalSpec,
+        sample_rate_hz: float = 2_048_000.0,
+        center_freq_hz: float = DEFAULT_CENTER_FREQ_HZ,
+        gain_db: float = MOCK_CAPABILITIES.max_gain_db,
+        noise_amplitude: float = 0.0,
+        capabilities: DeviceCapabilities = MOCK_CAPABILITIES,
+        rng: np.random.Generator | None = None,
+        realtime: bool = False,
+    ) -> None:
+        super().__init__(
+            sample_rate_hz=sample_rate_hz,
+            center_freq_hz=center_freq_hz,
+            gain_db=gain_db,
+            tones=(),
+            noise_amplitude=noise_amplitude,
+            capabilities=capabilities,
+            rng=rng,
+            realtime=realtime,
+        )
+        self._am = am
+        self._carrier_phase = 0.0
+        self._audio_phase = 0.0
+
+    @property
+    def am(self) -> AMSignalSpec:
+        return self._am
+
+    def connect(self) -> None:
+        super().connect()
+        self._carrier_phase = 0.0
+        self._audio_phase = 0.0
+
+    def read_samples(self, num_samples: int) -> np.ndarray:
+        if not self._connected:
+            raise RuntimeError("AMMockDevice is not connected")
+        if num_samples <= 0:
+            raise ValueError("num_samples must be positive")
+
+        if self._realtime:
+            import time
+
+            time.sleep(num_samples / self._sample_rate_hz)
+
+        indices = np.arange(num_samples, dtype=np.float64)
+        noise = self._noise_amplitude * (
+            self._rng.standard_normal(num_samples)
+            + 1j * self._rng.standard_normal(num_samples)
+        )
+        self._sample_index += num_samples
+
+        offset_hz = self._am.carrier_freq_hz - self._center_freq_hz
+        if abs(offset_hz) >= self._sample_rate_hz / 2.0:
+            return noise.astype(np.complex64)  # out of band: noise only
+
+        audio_step = 2.0 * np.pi * self._am.audio_freq_hz / self._sample_rate_hz
+        audio_phase = self._audio_phase + audio_step * indices
+        envelope = self._am.relative_amplitude * (
+            1.0 + self._am.modulation_index * np.sin(audio_phase)
+        )
+
+        carrier_step = 2.0 * np.pi * offset_hz / self._sample_rate_hz
+        carrier_phase = self._carrier_phase + carrier_step * indices
+
+        gain_scale = 10 ** ((self._gain_db - self._capabilities.max_gain_db) / 20.0)
+        signal = gain_scale * envelope * np.exp(1j * carrier_phase)
+
+        two_pi = 2.0 * np.pi
+        self._audio_phase = float((self._audio_phase + audio_step * num_samples) % two_pi)
+        self._carrier_phase = float(
+            (self._carrier_phase + carrier_step * num_samples) % two_pi
+        )
+
+        return (signal + noise).astype(np.complex64)
+
+
 def noise_only(
     sample_rate_hz: float = 2_048_000.0,
     center_freq_hz: float = DEFAULT_CENTER_FREQ_HZ,
@@ -204,6 +294,29 @@ def sweep_tone(
         ),
         sample_rate_hz=sample_rate_hz,
         center_freq_hz=center_freq_hz,
+        realtime=realtime,
+    )
+
+
+def am_tone(
+    offset_hz: float = 50_000.0,
+    audio_freq_hz: float = 1_000.0,
+    modulation_index: float = 0.5,
+    center_freq_hz: float = DEFAULT_CENTER_FREQ_HZ,
+    sample_rate_hz: float = 2_048_000.0,
+    noise_amplitude: float = 0.0,
+    realtime: bool = False,
+) -> AMMockDevice:
+    """Convenience factory for an AM-modulated carrier at ``offset_hz``."""
+    return AMMockDevice(
+        am=AMSignalSpec(
+            carrier_freq_hz=center_freq_hz + offset_hz,
+            audio_freq_hz=audio_freq_hz,
+            modulation_index=modulation_index,
+        ),
+        sample_rate_hz=sample_rate_hz,
+        center_freq_hz=center_freq_hz,
+        noise_amplitude=noise_amplitude,
         realtime=realtime,
     )
 

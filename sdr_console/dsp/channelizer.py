@@ -170,16 +170,18 @@ def frequency_shift(
 
 
 def filter_and_decimate(
-    iq: np.ndarray,
+    samples: np.ndarray,
     taps: np.ndarray,
     decimation: int,
     filter_state: np.ndarray | None = None,
     start_offset: int = 0,
 ) -> tuple[np.ndarray, np.ndarray | None, int]:
-    """Low-pass ``iq`` with ``taps`` and keep every ``decimation``-th sample.
+    """Low-pass ``samples`` with ``taps`` and keep every ``decimation``-th one.
+
+    Works for complex IQ and for real audio; the output dtype follows the input.
 
     Args:
-        iq: Complex baseband samples.
+        samples: Complex or real samples to decimate.
         taps: FIR taps from :func:`design_channel_filter`.
         decimation: Integer downsampling factor (1 keeps every sample).
         filter_state: FIR delay line from the previous block.
@@ -187,8 +189,8 @@ def filter_and_decimate(
             decimation grid never slips between blocks.
 
     Returns:
-        Decimated complex64 samples, the new filter state, and the offset for
-        the next block.
+        Decimated samples, the new filter state, and the offset for the next
+        block.
     """
     if decimation < 1:
         raise ValueError("decimation must be at least 1")
@@ -198,19 +200,19 @@ def filter_and_decimate(
         raise ValueError("start_offset must be in [0, decimation)")
 
     if taps.size == 1:
-        filtered = iq * taps[0]
+        filtered = samples * taps[0]
         next_state = filter_state
     else:
         zi = (
             filter_state
             if filter_state is not None
-            else np.zeros(taps.size - 1, dtype=np.complex64)
+            else np.zeros(taps.size - 1, dtype=np.result_type(samples.dtype, taps.dtype))
         )
-        filtered, next_state = lfilter(taps, 1.0, iq, zi=zi)
+        filtered, next_state = lfilter(taps, 1.0, samples, zi=zi)
 
     decimated = filtered[start_offset::decimation]
-    next_offset = (start_offset - iq.size) % decimation
-    return decimated.astype(np.complex64, copy=False), next_state, next_offset
+    next_offset = (start_offset - samples.size) % decimation
+    return np.ascontiguousarray(decimated), next_state, next_offset
 
 
 def channelize(
@@ -245,7 +247,10 @@ def channelize(
         start_offset=current.decimation_offset,
     )
 
-    block = ChannelizedBlock(samples=samples, sample_rate_hz=plan.output_rate_hz)
+    block = ChannelizedBlock(
+        samples=samples.astype(np.complex64, copy=False),
+        sample_rate_hz=plan.output_rate_hz,
+    )
     next_state = ChannelizerState(
         phase_rad=next_phase,
         filter_state=filter_state,

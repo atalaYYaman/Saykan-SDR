@@ -39,10 +39,13 @@ from sdr_console.hal.registry import (
 )
 from sdr_console.hal.rtlsdr_device import RTLSDR_CAPABILITIES, RtlSdrDevice
 from sdr_console.hal.scenarios import (
+    AMMockDevice,
+    AMSignalSpec,
     BurstMockDevice,
     BurstToneSpec,
     SweepMockDevice,
     SweepToneSpec,
+    am_tone,
     burst_tone,
     clipping_source,
     noise_only,
@@ -50,6 +53,8 @@ from sdr_console.hal.scenarios import (
 )
 
 __all__ = [
+    "AMMockDevice",
+    "AMSignalSpec",
     "BurstMockDevice",
     "BurstToneSpec",
     "DEVICE_CHOICES",
@@ -81,6 +86,7 @@ __all__ = [
     "SDRDeviceInterface",
     "SweepMockDevice",
     "SweepToneSpec",
+    "am_tone",
     "burst_tone",
     "clipping_source",
     "create_device",
