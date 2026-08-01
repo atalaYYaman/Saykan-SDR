@@ -1,0 +1,91 @@
+# SDR Konsolu — Cursor Agent Kuralları
+ 
+---
+ 
+## 1. Proje Kimliği
+ 
+Bu proje kişisel kullanım için geliştirilen bir **SDR Console**
+uygulamasıdır. Amaç: birden fazla SDR donanımından (RTL-SDR,
+ADALM-PLUTO, HackRF vb.) gelen IQ örneklerini gerçek zamanlı işleyip
+tür ve boyutuna göre bir **waterfall / spektrum görüntüleyicisine**
+yazdırmak.
+ 
+Teknoloji yığını (sabit — değiştirilmeden önce kullanıcıya sorulmalı):
+- Python 3.11+
+- Sayısal işleme: `numpy`, `scipy`
+- Arayüz: `PyQt6` (veya PyQt5, proje başında kararlaştırılır) +
+  `pyqtgraph` (waterfall/spektrum render için)
+- SDR erişimi: `SoapySDR` / `pyrtlsdr` / `pyadi-iio` gibi donanıma özel
+  sürücü katmanları
+- Çoklu iş parçacığı: `threading` veya `multiprocessing`
+  (GUI thread'i asla bloklanmamalı)
+- (Opsiyonel) Süreçler arası iletişim: `ZeroMQ`
+
+## 2. Katmanlı Mimari — Agent Bu Sınırları İhlal Etmemeli
+ 
+Kod her zaman aşağıdaki katmanlara ayrılmalı, katmanlar arası bağımlılık
+**tek yönlü** olmalı (üstteki katman alttakini çağırır, tersi olmaz):
+ 
+1. **HAL — Hardware Abstraction Layer** (`sdr_console/hal/`)
+   Donanımla konuşan tek katman. Her SDR türü için ayrı bir `Device`
+   sınıfı, ortak bir `SDRDeviceInterface` (ABC) üzerinden.
+2. **DSP — Signal Processing** (`sdr_console/dsp/`)
+   FFT, pencereleme, decimation, dB dönüşümü. Saf fonksiyonlar,
+   numpy/scipy dışında bağımlılık yok. GUI'den tamamen habersiz.
+3. **Data / Buffer / IPC** (`sdr_console/pipeline/`)
+   Thread-safe ring buffer / queue. HAL'den gelen ham veriyi DSP'ye,
+   DSP çıktısını UI'ye taşır. Backpressure ve örnek düşürme burada
+   yönetilir.
+4. **Visualization** (`sdr_console/viz/`)
+   `pyqtgraph` tabanlı waterfall ve spektrum widget'ları. Sadece
+   hazır (işlenmiş) veriyi çizer, işlem yapmaz.
+5. **UI / Control** (`sdr_console/ui/`)
+   Ana pencere, cihaz seçimi, kazanç/frekans kontrolleri, ayarlar
+   paneli. `viz` katmanını kullanır, DSP'yi asla doğrudan çağırmaz.
+6. **Config / Persistence** (`sdr_console/config/`)
+   Profil/ayar dosyaları (JSON/YAML), son kullanılan cihaz/frekans
+   gibi kalıcı durum.
+Kural: Agent yeni bir dosya oluştururken önce "bu hangi katmana ait?"
+sorusunu cevaplamalı ve dosyayı doğru klasöre koymalı. Katmanlar arası
+kısayol (örneğin UI'den doğrudan numpy FFT çağırmak) **yasak**.
+ 
+## 3. Genel Kodlama Kuralları
+ 
+- Tüm public fonksiyon/sınıflarda type hint kullan.
+- GUI thread'inde asla ağır işlem (FFT, dosya IO, ağ) çalıştırma —
+  bunlar worker thread/process'e taşınmalı, sinyal/slot ile UI
+  güncellenmeli.
+- Gerçek zamanlı veri akışı olduğu için gereksiz kopyalama yapma;
+  numpy array'lerini mümkün olduğunca in-place işle, `.copy()`'yi
+  sadece gerekli olduğunda kullan.
+- Her yeni SDR sürücüsü, `SDRDeviceInterface`'i implemente etmeli;
+  var olan sürücü kodunu değiştirmeden yeni cihaz eklenebilmeli
+  (Open/Closed prensibi).
+- Test yazarken donanıma bağımlı olmayan senaryoları mock IQ verisiyle
+  test et (`tests/fixtures/` altında örnek IQ dosyaları).
+- Docstring'ler Türkçe veya İngilizce olabilir ama proje boyunca
+  **tutarlı** olmalı — hangisi seçilirse ilk oturumda karar verilsin.
+- Performans kritik döngülerde profil çıkar (`cProfile` / `line_profiler`),
+  tahmine dayalı optimizasyon yapma.
+## 4. Agent Davranış Kuralları
+ 
+- Büyük bir özellik eklemeden önce **kısa bir plan** yaz (hangi
+  dosyalar değişecek, hangi katmanlar etkilenecek), sonra uygula.
+- Bir katmanın sorumluluğuna girmeyen kod önerme; gerekiyorsa önce
+  mimariyi güncellemeyi öner, sessizce sınır ihlali yapma.
+- Yeni bir bağımlılık eklemeden önce mutlaka sor — özellikle GUI
+  framework'ü veya SDR kütüphanesi gibi temel seçimler kilitli kabul
+  edilmeli.
+- Kod üretirken önce mevcut ilgili dosyaları oku, var olan
+  isimlendirme/patternleri tekrar kullan.
+- Her önemli değişiklikten sonra ilgili katmanın kısa bir test/manuel
+  doğrulama önerisini de ver (örn. "bu HAL değişikliğini X cihazıyla
+  test et").
+## 5. Yasaklar
+ 
+- HAL dışında hiçbir katman donanımla doğrudan konuşmamalı.
+- UI katmanında numpy/scipy'ye doğrudan bağımlılık olmamalı (DSP
+  katmanı üzerinden gelmeli).
+- Global mutable state (özellikle donanım handle'ları) `hal` dışında
+  tutulmamalı.
+ 
