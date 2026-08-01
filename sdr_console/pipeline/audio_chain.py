@@ -107,6 +107,12 @@ class AudioChain:
         """Retune the listening channel while playing."""
         self._worker.set_channel(channel)
 
+    def set_demod_mode(self, mode: str) -> None:
+        """Switch demodulation mode; applied at the next audio block."""
+        from sdr_console.demod.factory import demodulator_factory
+
+        self._worker.set_demodulator_factory(demodulator_factory(mode))
+
     def start(self) -> None:
         """Open the sound card, then start demodulating.
 

@@ -120,6 +120,12 @@ def test_app_config_sanitizes_channel_and_audio_fields() -> None:
     assert config.demod_mode == "AM"
 
 
+def test_app_config_sanitizes_unknown_demod_mode() -> None:
+    config = AppConfig.from_dict({"demod_mode": "SSB"})
+
+    assert config.demod_mode == "AM"
+
+
 def test_save_and_load_roundtrip(tmp_path: Path) -> None:
     config_path = tmp_path / "config.json"
     original = AppConfig.default()

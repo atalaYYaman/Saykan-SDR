@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from sdr_console.demod.cw import CWDemodulator, DEFAULT_BFO_OFFSET_HZ
+from sdr_console.demod.cw import DEFAULT_BFO_OFFSET_HZ, CWDemodulator
 from sdr_console.demod.fm import NFMDemodulator, WFMDemodulator
 from sdr_console.demod.ssb import LSBDemodulator, USBDemodulator
 from sdr_console.dsp.channel import ChannelSpec

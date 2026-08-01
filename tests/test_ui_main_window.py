@@ -86,9 +86,9 @@ def test_plot_selection_moves_vfo_without_retuning_device(window: MainWindow) ->
 
     assert window._channel.center_freq_hz == target_hz
     assert window._config.listen_freq_hz == target_hz
+    assert window._listen_freq_spin.value() == target_hz
     assert window._device.center_freq_hz == original_center_hz
-    assert window._vfo_label is not None
-    assert "MHz" in window._vfo_label.text()
+    assert window._listen_freq_spin.value() == target_hz
 
 
 def test_out_of_band_selection_is_clamped_to_the_visible_span(window: MainWindow) -> None:
@@ -153,6 +153,7 @@ def test_vfo_label_reports_the_resulting_if_rate(window: MainWindow) -> None:
     assert "BW 200.000 kHz" in text
     assert "IF 204.800 kHz" in text
     assert "dec 10" in text
+    assert "AM" in text
 
 
 def test_close_event_persists_listening_channel(
@@ -176,11 +177,90 @@ def test_audio_toggle_while_idle_waits_for_the_stream(window: MainWindow) -> Non
     assert "stream" in window._status_label.text().lower()
 
 
-def test_volume_slider_updates_config_and_label(window: MainWindow) -> None:
+def test_volume_slider_updates_config_and_spin(window: MainWindow) -> None:
     window._volume_slider.setValue(35)
 
     assert window._config.audio_volume == pytest.approx(0.35)
-    assert window._volume_label.text() == "35%"
+    assert window._volume_spin.value() == 35
+
+
+def test_volume_spin_updates_slider_and_config(window: MainWindow) -> None:
+    window._volume_spin.setValue(62)
+
+    assert window._volume_slider.value() == 62
+    assert window._config.audio_volume == pytest.approx(0.62)
+
+
+def test_freq_step_combo_updates_spin_steps(window: MainWindow) -> None:
+    index = window._freq_step_combo.findData(10_000.0)
+    window._freq_step_combo.setCurrentIndex(index)
+
+    assert window._config.freq_step_hz == 10_000.0
+    assert window._center_freq_spin.singleStep() == 10_000.0
+    assert window._listen_freq_spin.singleStep() == 10_000.0
+
+
+def test_gain_step_combo_updates_gain_spin(window: MainWindow) -> None:
+    index = window._gain_step_combo.findData(3.0)
+    window._gain_step_combo.setCurrentIndex(index)
+
+    assert window._config.gain_step_db == 3.0
+    assert window._gain_spin.singleStep() == 3.0
+
+
+def test_listen_freq_spin_moves_the_channel(window: MainWindow) -> None:
+    target_hz = window._device.center_freq_hz + 250_000.0
+    window._listen_freq_spin.setValue(target_hz)
+
+    assert window._channel.center_freq_hz == target_hz
+    assert window._config.listen_freq_hz == target_hz
+
+
+def test_demod_mode_switch_sets_default_bandwidth(window: MainWindow) -> None:
+    index = window._demod_combo.findData("CW")
+    window._demod_combo.setCurrentIndex(index)
+
+    assert window._config.demod_mode == "CW"
+    assert window._channel.bandwidth_hz == 500.0
+    assert "CW" in window._vfo_label.text()
+
+
+def test_demod_mode_reaches_audio_chain_while_streaming(
+    window: MainWindow,
+    qtbot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_fake_audio_sink(monkeypatch)
+    window._audio_check.setChecked(True)
+    qtbot.mouseClick(window._start_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: window._audio_chain is not None, timeout=5000)
+
+    index = window._demod_combo.findData("USB")
+    window._demod_combo.setCurrentIndex(index)
+
+    chain = window._audio_chain
+    assert chain is not None
+    qtbot.waitUntil(
+        lambda: chain.worker.demodulator is not None
+        and chain.worker.demodulator.mode == "USB",
+        timeout=5000,
+    )
+    window.close()
+
+
+def test_close_event_persists_demod_and_step_settings(
+    window: MainWindow,
+    tmp_config_path: Path,
+) -> None:
+    window._demod_combo.setCurrentIndex(window._demod_combo.findData("N-FM"))
+    window._freq_step_combo.setCurrentIndex(window._freq_step_combo.findData(25_000.0))
+    window._gain_step_combo.setCurrentIndex(window._gain_step_combo.findData(0.5))
+    window.close()
+
+    loaded = load_config(tmp_config_path)
+    assert loaded.demod_mode == "N-FM"
+    assert loaded.freq_step_hz == 25_000.0
+    assert loaded.gain_step_db == 0.5
 
 
 def test_audio_starts_with_the_stream_and_stops_with_it(

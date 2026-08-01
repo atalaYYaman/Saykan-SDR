@@ -7,6 +7,7 @@ import math
 from dataclasses import asdict, dataclass, fields
 
 from sdr_console.config.defaults import AppDefaults
+from sdr_console.demod.factory import is_known_demod_mode
 from sdr_console.dsp.channel import MIN_CHANNEL_BANDWIDTH_HZ
 from sdr_console.hal.registry import MOCK_DEVICE_ID, is_known_device_id
 
@@ -202,7 +203,13 @@ def _sanitize(config: AppConfig) -> AppConfig:
         )
         config.channel_bandwidth_hz = AppConfig.default().channel_bandwidth_hz
 
-    if not config.demod_mode:
+    if not config.demod_mode or not is_known_demod_mode(config.demod_mode):
+        if config.demod_mode and not is_known_demod_mode(config.demod_mode):
+            logger.warning(
+                "demod_mode %r is unknown; using %s",
+                config.demod_mode,
+                AppConfig.default().demod_mode,
+            )
         config.demod_mode = AppConfig.default().demod_mode
 
     if not math.isfinite(config.audio_volume):

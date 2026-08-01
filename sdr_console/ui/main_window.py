@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QSlider,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -27,6 +28,11 @@ from sdr_console.audio.errors import AudioError
 from sdr_console.audio.sink import sounddevice_available
 from sdr_console.config.app_config import AppConfig
 from sdr_console.config.storage import save_config
+from sdr_console.demod.factory import (
+    DEMOD_MODES,
+    default_bandwidth_hz,
+    demodulator_factory,
+)
 from sdr_console.dsp.channel import MIN_CHANNEL_BANDWIDTH_HZ, ChannelSpec
 from sdr_console.dsp.channelizer import choose_decimation
 from sdr_console.hal.discovery import scan_devices
@@ -59,6 +65,16 @@ CHANNEL_BANDWIDTH_CHOICES_HZ: tuple[float, ...] = (
 )
 # Rate the demodulation chain will ask for; shown as the resulting IF rate.
 DEMOD_TARGET_RATE_HZ = 48_000.0
+FREQ_STEP_CHOICES_HZ: tuple[float, ...] = (
+    1.0,
+    100.0,
+    1_000.0,
+    10_000.0,
+    25_000.0,
+    100_000.0,
+    1_000_000.0,
+)
+GAIN_STEP_CHOICES_DB: tuple[float, ...] = (0.1, 0.5, 1.0, 3.0, 6.0)
 
 
 def format_frequency(freq_hz: float) -> str:
@@ -261,13 +277,51 @@ class MainWindow(QMainWindow):
         self._center_freq_spin.setSuffix(" Hz")
         self._center_freq_spin.setDecimals(0)
         self._center_freq_spin.setRange(caps.min_freq_hz, caps.max_freq_hz)
-        self._center_freq_spin.setSingleStep(1_000_000.0)
+        self._center_freq_spin.setSingleStep(self._config.freq_step_hz)
+
+        self._freq_step_combo = QComboBox()
+        self._freq_step_combo.setToolTip("Arrow keys / mouse wheel step for frequency spin boxes")
+        for step_hz in FREQ_STEP_CHOICES_HZ:
+            label = format_frequency(step_hz).replace(" ", "")
+            self._freq_step_combo.addItem(label, step_hz)
+
+        center_row = QWidget()
+        center_layout = QHBoxLayout(center_row)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.addWidget(self._center_freq_spin, stretch=1)
+        center_layout.addWidget(QLabel("Step"))
+        center_layout.addWidget(self._freq_step_combo)
+
+        self._listen_freq_spin = QDoubleSpinBox()
+        self._listen_freq_spin.setSuffix(" Hz")
+        self._listen_freq_spin.setDecimals(0)
+        self._listen_freq_spin.setToolTip(
+            "Listening frequency (VFO). Does not retune the device centre frequency."
+        )
+        self._update_listen_freq_range()
+
+        listen_row = QWidget()
+        listen_layout = QHBoxLayout(listen_row)
+        listen_layout.setContentsMargins(0, 0, 0, 0)
+        listen_layout.addWidget(self._listen_freq_spin, stretch=1)
 
         self._gain_spin = QDoubleSpinBox()
         self._gain_spin.setSuffix(" dB")
         self._gain_spin.setDecimals(1)
         self._gain_spin.setRange(caps.min_gain_db, caps.max_gain_db)
-        self._gain_spin.setSingleStep(1.0)
+        self._gain_spin.setSingleStep(self._config.gain_step_db)
+
+        self._gain_step_combo = QComboBox()
+        self._gain_step_combo.setToolTip("Arrow keys / mouse wheel step for the gain spin box")
+        for step_db in GAIN_STEP_CHOICES_DB:
+            self._gain_step_combo.addItem(f"{step_db:g} dB", step_db)
+
+        gain_row = QWidget()
+        gain_layout = QHBoxLayout(gain_row)
+        gain_layout.setContentsMargins(0, 0, 0, 0)
+        gain_layout.addWidget(self._gain_spin, stretch=1)
+        gain_layout.addWidget(QLabel("Step"))
+        gain_layout.addWidget(self._gain_step_combo)
 
         self._gain_mode_combo = QComboBox()
         for mode in caps.gain_modes:
@@ -298,17 +352,20 @@ class MainWindow(QMainWindow):
             "to move the listening frequency"
         )
 
-        tuning_form.addRow("Center frequency", self._center_freq_spin)
-        tuning_form.addRow("Gain", self._gain_spin)
+        tuning_form.addRow("Center frequency", center_row)
+        tuning_form.addRow("Listen (VFO)", listen_row)
+        tuning_form.addRow("Gain", gain_row)
         tuning_form.addRow("Gain mode", self._gain_mode_combo)
         tuning_form.addRow("Sample rate", self._sample_rate_combo)
         tuning_form.addRow("FFT size", self._fft_size_combo)
         tuning_form.addRow("Bandwidth", self._bandwidth_combo)
-        tuning_form.addRow("Listen (VFO)", self._vfo_label)
+        tuning_form.addRow("Channel", self._vfo_label)
         root.addWidget(tuning_box)
 
         audio_box = QGroupBox("Audio")
-        audio_row = QHBoxLayout(audio_box)
+        audio_layout = QVBoxLayout(audio_box)
+
+        audio_top = QHBoxLayout()
         self._audio_check = QCheckBox("Enable")
         available, detail = sounddevice_available()
         self._audio_check.setEnabled(available)
@@ -316,16 +373,31 @@ class MainWindow(QMainWindow):
             f"Output: {detail}" if available else f"Unavailable: {detail}"
         )
 
+        self._demod_combo = QComboBox()
+        self._demod_combo.setToolTip("Demodulation mode for the listening chain")
+        for mode in DEMOD_MODES:
+            self._demod_combo.addItem(mode, mode)
+
+        audio_top.addWidget(self._audio_check)
+        audio_top.addWidget(QLabel("Mode"))
+        audio_top.addWidget(self._demod_combo)
+        audio_top.addStretch()
+        audio_layout.addLayout(audio_top)
+
+        volume_row = QHBoxLayout()
         self._volume_slider = QSlider(Qt.Orientation.Horizontal)
         self._volume_slider.setRange(0, 100)
         self._volume_slider.setMaximumWidth(220)
-        self._volume_label = QLabel()
+        self._volume_spin = QSpinBox()
+        self._volume_spin.setRange(0, 100)
+        self._volume_spin.setSuffix(" %")
+        self._volume_spin.setMaximumWidth(72)
 
-        audio_row.addWidget(self._audio_check)
-        audio_row.addWidget(QLabel("Volume:"))
-        audio_row.addWidget(self._volume_slider)
-        audio_row.addWidget(self._volume_label)
-        audio_row.addStretch()
+        volume_row.addWidget(QLabel("Volume"))
+        volume_row.addWidget(self._volume_slider)
+        volume_row.addWidget(self._volume_spin)
+        volume_row.addStretch()
+        audio_layout.addLayout(volume_row)
         root.addWidget(audio_box)
 
         display_box = QGroupBox("Display")
@@ -368,8 +440,11 @@ class MainWindow(QMainWindow):
         self._device_combo.currentIndexChanged.connect(self._on_device_changed)
         self._uri_edit.editingFinished.connect(self._on_uri_changed)
         self._center_freq_spin.valueChanged.connect(self._on_center_freq_changed)
+        self._listen_freq_spin.valueChanged.connect(self._on_listen_freq_changed)
         self._gain_spin.valueChanged.connect(self._on_gain_changed)
         self._gain_mode_combo.currentIndexChanged.connect(self._on_gain_mode_changed)
+        self._freq_step_combo.currentIndexChanged.connect(self._on_freq_step_changed)
+        self._gain_step_combo.currentIndexChanged.connect(self._on_gain_step_changed)
         self._sample_rate_combo.currentIndexChanged.connect(self._on_sample_rate_changed)
         self._sample_rate_combo.editTextChanged.connect(self._on_sample_rate_edited)
         self._fft_size_combo.currentIndexChanged.connect(self._on_fft_size_changed)
@@ -380,11 +455,14 @@ class MainWindow(QMainWindow):
         self._vmin_spin.valueChanged.connect(self._on_display_levels_changed)
         self._vmax_spin.valueChanged.connect(self._on_display_levels_changed)
         self._audio_check.toggled.connect(self._on_audio_toggled)
+        self._demod_combo.currentIndexChanged.connect(self._on_demod_mode_changed)
         self._volume_slider.valueChanged.connect(self._on_volume_changed)
+        self._volume_spin.valueChanged.connect(self._on_volume_spin_changed)
 
     def _sync_controls_from_config(self) -> None:
         widgets = (
             self._center_freq_spin,
+            self._listen_freq_spin,
             self._gain_spin,
             self._vmin_spin,
             self._vmax_spin,
@@ -393,14 +471,25 @@ class MainWindow(QMainWindow):
             self._gain_mode_combo,
             self._bandwidth_combo,
             self._uri_edit,
+            self._freq_step_combo,
+            self._gain_step_combo,
+            self._demod_combo,
             self._volume_slider,
+            self._volume_spin,
         )
         for widget in widgets:
             widget.blockSignals(True)
 
         self._center_freq_spin.setValue(self._device.center_freq_hz)
+        self._listen_freq_spin.setValue(self._channel.center_freq_hz)
         self._gain_spin.setValue(self._device.gain_db)
         self._uri_edit.setText(self._config.device_uri)
+
+        demod_index = self._demod_combo.findData(self._config.demod_mode)
+        if demod_index >= 0:
+            self._demod_combo.setCurrentIndex(demod_index)
+
+        self._sync_step_combos()
 
         mode_index = self._gain_mode_combo.findData(self._device.gain_mode)
         if mode_index < 0:
@@ -421,7 +510,7 @@ class MainWindow(QMainWindow):
 
         self._vmin_spin.setValue(self._config.display_vmin_db)
         self._vmax_spin.setValue(self._config.display_vmax_db)
-        self._volume_slider.setValue(int(round(self._config.audio_volume * 100)))
+        self._set_volume_ui(int(round(self._config.audio_volume * 100)))
 
         for widget in widgets:
             widget.blockSignals(False)
@@ -429,7 +518,34 @@ class MainWindow(QMainWindow):
         self._update_gain_spin_enabled()
         self._sync_bandwidth_combo()
         self._update_vfo_label()
-        self._update_volume_label()
+
+    def _sync_step_combos(self) -> None:
+        freq_index = self._freq_step_combo.findData(self._config.freq_step_hz)
+        if freq_index < 0:
+            freq_index = self._freq_step_combo.findData(100_000.0)
+        if freq_index >= 0:
+            self._freq_step_combo.setCurrentIndex(freq_index)
+            step_hz = float(self._freq_step_combo.currentData())
+            self._center_freq_spin.setSingleStep(step_hz)
+            self._listen_freq_spin.setSingleStep(step_hz)
+
+        gain_index = self._gain_step_combo.findData(self._config.gain_step_db)
+        if gain_index < 0:
+            gain_index = self._gain_step_combo.findData(1.0)
+        if gain_index >= 0:
+            self._gain_step_combo.setCurrentIndex(gain_index)
+            self._gain_spin.setSingleStep(float(self._gain_step_combo.currentData()))
+
+    def _update_listen_freq_range(self) -> None:
+        half_band = self._device.sample_rate_hz / 2.0
+        low_hz = self._device.center_freq_hz - half_band
+        high_hz = self._device.center_freq_hz + half_band
+        self._listen_freq_spin.setRange(low_hz, high_hz)
+
+    def _sync_listen_freq_spin(self) -> None:
+        self._listen_freq_spin.blockSignals(True)
+        self._listen_freq_spin.setValue(self._channel.center_freq_hz)
+        self._listen_freq_spin.blockSignals(False)
 
     def _update_vfo_label(self) -> None:
         if self._vfo_label is None:
@@ -441,10 +557,10 @@ class MainWindow(QMainWindow):
             DEMOD_TARGET_RATE_HZ,
         )
         if_rate_hz = self._device.sample_rate_hz / decimation
+        mode = self._demod_combo.currentText() or self._config.demod_mode
         self._vfo_label.setText(
-            f"{format_frequency(self._channel.center_freq_hz)}  "
-            f"(BW {format_frequency(self._channel.bandwidth_hz)}, "
-            f"IF {format_frequency(if_rate_hz)} / dec {decimation})"
+            f"{mode} — BW {format_frequency(self._channel.bandwidth_hz)}, "
+            f"IF {format_frequency(if_rate_hz)} / dec {decimation}"
         )
 
     def _current_bandwidth_hz(self) -> float | None:
@@ -504,17 +620,66 @@ class MainWindow(QMainWindow):
         self._config.channel_bandwidth_hz = clamped.bandwidth_hz
         self._display.set_channel(clamped)
         self._update_vfo_label()
+        self._sync_listen_freq_spin()
         if self._audio_chain is not None:
             self._audio_chain.set_channel(clamped)
 
-    def _update_volume_label(self) -> None:
-        self._volume_label.setText(f"{self._volume_slider.value()}%")
+    def _set_volume_ui(self, percent: int) -> None:
+        percent = max(0, min(100, percent))
+        self._volume_slider.blockSignals(True)
+        self._volume_spin.blockSignals(True)
+        self._volume_slider.setValue(percent)
+        self._volume_spin.setValue(percent)
+        self._volume_slider.blockSignals(False)
+        self._volume_spin.blockSignals(False)
 
-    def _on_volume_changed(self, value: int) -> None:
-        self._config.audio_volume = value / 100.0
-        self._update_volume_label()
+    def _apply_volume(self, percent: int) -> None:
+        self._set_volume_ui(percent)
+        self._config.audio_volume = percent / 100.0
         if self._audio_chain is not None:
             self._audio_chain.set_volume(self._config.audio_volume)
+
+    def _on_volume_changed(self, value: int) -> None:
+        self._apply_volume(value)
+
+    def _on_volume_spin_changed(self, value: int) -> None:
+        self._apply_volume(value)
+
+    def _on_freq_step_changed(self) -> None:
+        step_hz = self._freq_step_combo.currentData()
+        if step_hz is None:
+            return
+        self._config.freq_step_hz = float(step_hz)
+        self._center_freq_spin.setSingleStep(self._config.freq_step_hz)
+        self._listen_freq_spin.setSingleStep(self._config.freq_step_hz)
+
+    def _on_gain_step_changed(self) -> None:
+        step_db = self._gain_step_combo.currentData()
+        if step_db is None:
+            return
+        self._config.gain_step_db = float(step_db)
+        self._gain_spin.setSingleStep(self._config.gain_step_db)
+
+    def _on_listen_freq_changed(self, value: float) -> None:
+        self._set_channel(self._channel.with_center(value))
+
+    def _on_demod_mode_changed(self) -> None:
+        mode = self._demod_combo.currentData()
+        if mode is None:
+            return
+        mode_str = str(mode)
+        if mode_str == self._config.demod_mode:
+            return
+
+        self._config.demod_mode = mode_str
+        self._set_channel(
+            self._channel.with_bandwidth(default_bandwidth_hz(mode_str))
+        )
+        self._sync_bandwidth_combo()
+        if self._audio_chain is not None:
+            self._audio_chain.set_demod_mode(mode_str)
+        self._update_vfo_label()
+        self._set_idle_or_streaming_status()
 
     def _on_audio_toggled(self, checked: bool) -> None:
         self._audio_requested = checked
@@ -541,6 +706,7 @@ class MainWindow(QMainWindow):
             channel=self._channel,
             preferred_audio_rate_hz=DEMOD_TARGET_RATE_HZ,
             volume=self._config.audio_volume,
+            demodulator_factory=demodulator_factory(self._config.demod_mode),
         )
         try:
             chain.start()
@@ -599,7 +765,9 @@ class MainWindow(QMainWindow):
         text = f"Streaming ({name})"
         chain = self._audio_chain
         if chain is not None and chain.sink is not None:
-            text += f" — audio {chain.sink.sample_rate_hz / 1_000.0:.1f} kHz"
+            demod = chain.worker.demodulator
+            mode = demod.mode if demod is not None else self._config.demod_mode
+            text += f" — {mode} audio {chain.sink.sample_rate_hz / 1_000.0:.1f} kHz"
             if chain.underruns:
                 text += f", {chain.underruns} underruns"
         return text
@@ -777,6 +945,7 @@ class MainWindow(QMainWindow):
         caps = self._device.capabilities
         self._center_freq_spin.setRange(caps.min_freq_hz, caps.max_freq_hz)
         self._gain_spin.setRange(caps.min_gain_db, caps.max_gain_db)
+        self._update_listen_freq_range()
         self._configure_sample_rate_combo(caps)
 
         self._gain_mode_combo.blockSignals(True)
@@ -830,6 +999,7 @@ class MainWindow(QMainWindow):
             self._device.center_freq_hz,
         )
         self._sync_display_tuning()
+        self._update_listen_freq_range()
 
     def _on_gain_changed(self, value: float) -> None:
         self._apply_device_setter(
@@ -964,6 +1134,15 @@ class MainWindow(QMainWindow):
         self._config.listen_freq_hz = self._channel.center_freq_hz
         self._config.channel_bandwidth_hz = self._channel.bandwidth_hz
         self._config.audio_volume = self._volume_slider.value() / 100.0
+        demod_mode = self._demod_combo.currentData()
+        if demod_mode is not None:
+            self._config.demod_mode = str(demod_mode)
+        freq_step = self._freq_step_combo.currentData()
+        if freq_step is not None:
+            self._config.freq_step_hz = float(freq_step)
+        gain_step = self._gain_step_combo.currentData()
+        if gain_step is not None:
+            self._config.gain_step_db = float(gain_step)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 — Qt API
         if self._connect_worker is not None and self._connect_worker.isRunning():
