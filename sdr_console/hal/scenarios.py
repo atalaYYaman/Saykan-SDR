@@ -14,6 +14,9 @@ from sdr_console.hal.mock_device import (
     MockTone,
 )
 
+#: Where the AM test carrier sits relative to the tuned centre frequency.
+AM_TEST_OFFSET_HZ = 50_000.0
+
 
 @dataclass(frozen=True)
 class SweepToneSpec:
@@ -293,15 +296,20 @@ def sweep_tone(
 
 
 def am_tone(
-    offset_hz: float = 50_000.0,
+    offset_hz: float = AM_TEST_OFFSET_HZ,
     audio_freq_hz: float = 1_000.0,
     modulation_index: float = 0.5,
     center_freq_hz: float = DEFAULT_CENTER_FREQ_HZ,
     sample_rate_hz: float = 2_048_000.0,
+    gain_db: float = MOCK_CAPABILITIES.max_gain_db,
     noise_amplitude: float = 0.0,
     realtime: bool = False,
 ) -> AMMockDevice:
-    """Convenience factory for an AM-modulated carrier at ``offset_hz``."""
+    """Convenience factory for an AM-modulated carrier at ``offset_hz``.
+
+    Also the registry factory for the AM test device, so its signature has to
+    accept the same keywords as the other mock constructors.
+    """
     return AMMockDevice(
         am=AMSignalSpec(
             carrier_freq_hz=center_freq_hz + offset_hz,
@@ -310,6 +318,7 @@ def am_tone(
         ),
         sample_rate_hz=sample_rate_hz,
         center_freq_hz=center_freq_hz,
+        gain_db=gain_db,
         noise_amplitude=noise_amplitude,
         realtime=realtime,
     )

@@ -12,6 +12,7 @@ from sdr_console.config.defaults import AppDefaults
 from sdr_console.hal.registry import (
     DEVICE_CHOICES,
     HACKRF_DEVICE_ID,
+    MOCK_AM_DEVICE_ID,
     MOCK_DEVICE_ID,
     MOCK_DEVICE_LABEL,
     PLUTO_DEVICE_ID,
@@ -21,6 +22,7 @@ from sdr_console.hal.registry import (
 
 __all__ = [
     "DEVICE_CHOICES",
+    "MOCK_AM_DEVICE_ID",
     "MOCK_DEVICE_ID",
     "MOCK_DEVICE_LABEL",
     "device_availability",
@@ -44,7 +46,7 @@ def device_create_kwargs(
         "gain_db": config.gain_db,
     }
 
-    if device_id == MOCK_DEVICE_ID:
+    if device_id in (MOCK_DEVICE_ID, MOCK_AM_DEVICE_ID):
         return {
             **common,
             "noise_amplitude": runtime_defaults.mock_noise_amplitude,

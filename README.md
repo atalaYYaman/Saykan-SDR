@@ -55,6 +55,11 @@ box on the spectrum: click the plots or drag the box to move it, and set its
 width with **Bandwidth**. Without the extra the console still runs; only the
 audio checkbox stays disabled.
 
+To hear something without hardware, pick **Mock Device (AM test, +50 kHz)**: it
+transmits a 1 kHz tone on an AM carrier 50 kHz above the tuned centre frequency.
+Move the listening box onto that carrier and raise **Gain** — the chain has no
+AGC, so audio level follows RF level.
+
 The demodulation chain runs beside the display chain on the same IQ stream, so a
 lagging waterfall never interrupts audio. Its sample rate follows the device rate
 (2.048 Msps gives 48.8 kHz audio) and the output stream is opened at exactly that

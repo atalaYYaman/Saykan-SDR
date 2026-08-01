@@ -7,6 +7,7 @@ from sdr_console.hal.registry import (
     DEVICE_CHOICES,
     HACKRF_DEVICE_ID,
     KNOWN_DEVICE_IDS,
+    MOCK_AM_DEVICE_ID,
     MOCK_DEVICE_ID,
     PLUTO_DEVICE_ID,
     RTLSDR_DEVICE_ID,
@@ -14,10 +15,12 @@ from sdr_console.hal.registry import (
     device_availability,
     is_known_device_id,
 )
+from sdr_console.hal.scenarios import AMMockDevice
 
 
 def test_known_device_ids_include_hardware_entries() -> None:
     assert MOCK_DEVICE_ID in KNOWN_DEVICE_IDS
+    assert MOCK_AM_DEVICE_ID in KNOWN_DEVICE_IDS
     assert PLUTO_DEVICE_ID in KNOWN_DEVICE_IDS
     assert RTLSDR_DEVICE_ID in KNOWN_DEVICE_IDS
     assert HACKRF_DEVICE_ID in KNOWN_DEVICE_IDS
@@ -29,10 +32,27 @@ def test_device_choices_labels() -> None:
     ids = [device_id for device_id, _ in DEVICE_CHOICES]
     assert ids == [
         MOCK_DEVICE_ID,
+        MOCK_AM_DEVICE_ID,
         PLUTO_DEVICE_ID,
         RTLSDR_DEVICE_ID,
         HACKRF_DEVICE_ID,
     ]
+
+
+def test_create_am_mock_device_carries_the_test_transmitter() -> None:
+    device = create_device(
+        MOCK_AM_DEVICE_ID,
+        sample_rate_hz=2_048_000.0,
+        center_freq_hz=100_000_000.0,
+        gain_db=40.0,
+        noise_amplitude=0.01,
+        realtime=False,
+    )
+
+    assert isinstance(device, AMMockDevice)
+    assert device.am.carrier_freq_hz == 100_050_000.0
+    assert device.gain_db == 40.0
+    assert device.capabilities is not None
 
 
 def test_create_device_mock_and_pluto() -> None:

@@ -11,9 +11,12 @@ from sdr_console.hal.interface import SDRDeviceInterface
 from sdr_console.hal.mock_device import MockSDRDevice
 from sdr_console.hal.pluto_device import PlutoSDRDevice
 from sdr_console.hal.rtlsdr_device import RtlSdrDevice
+from sdr_console.hal.scenarios import AM_TEST_OFFSET_HZ, am_tone
 
 MOCK_DEVICE_ID = "mock"
 MOCK_DEVICE_LABEL = "Mock Device"
+MOCK_AM_DEVICE_ID = "mock_am"
+MOCK_AM_DEVICE_LABEL = f"Mock Device (AM test, +{AM_TEST_OFFSET_HZ / 1_000.0:g} kHz)"
 PLUTO_DEVICE_ID = "pluto"
 PLUTO_DEVICE_LABEL = "ADALM-Pluto"
 RTLSDR_DEVICE_ID = "rtlsdr"
@@ -67,6 +70,7 @@ def _hackrf_available() -> tuple[bool, str]:
 
 _DEVICE_SPECS: tuple[DeviceSpec, ...] = (
     DeviceSpec(MOCK_DEVICE_ID, MOCK_DEVICE_LABEL, MockSDRDevice, _mock_available),
+    DeviceSpec(MOCK_AM_DEVICE_ID, MOCK_AM_DEVICE_LABEL, am_tone, _mock_available),
     DeviceSpec(PLUTO_DEVICE_ID, PLUTO_DEVICE_LABEL, PlutoSDRDevice, _pluto_available),
     DeviceSpec(RTLSDR_DEVICE_ID, RTLSDR_DEVICE_LABEL, RtlSdrDevice, _rtlsdr_available),
     DeviceSpec(HACKRF_DEVICE_ID, HACKRF_DEVICE_LABEL, HackRfDevice, _hackrf_available),
