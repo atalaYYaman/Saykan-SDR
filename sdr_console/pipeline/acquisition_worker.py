@@ -31,16 +31,39 @@ class AcquisitionWorker:
         max_consecutive_errors: int = DEFAULT_MAX_CONSECUTIVE_ERRORS,
     ) -> None:
         self._device = device
-        self._raw_queue = raw_queue
         self._read_chunk_size = read_chunk_size
         self._on_error = on_error
         self._max_consecutive_errors = max(1, max_consecutive_errors)
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        # Swapped as a whole so the reading thread never sees a partial list.
+        self._consumers: tuple[SampleQueue[np.ndarray], ...] = (raw_queue,)
+        self._consumers_lock = threading.Lock()
 
     @property
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def consumers(self) -> tuple[SampleQueue[np.ndarray], ...]:
+        """Queues currently receiving every acquired block."""
+        return self._consumers
+
+    def add_consumer(self, raw_queue: SampleQueue[np.ndarray]) -> None:
+        """Fan every acquired block out to ``raw_queue`` as well.
+
+        Lets a second chain (demodulation) read the same raw IQ as the spectrum
+        chain without either one waiting for the other.
+        """
+        with self._consumers_lock:
+            if raw_queue in self._consumers:
+                return
+            self._consumers = (*self._consumers, raw_queue)
+
+    def remove_consumer(self, raw_queue: SampleQueue[np.ndarray]) -> None:
+        """Stop feeding ``raw_queue``."""
+        with self._consumers_lock:
+            self._consumers = tuple(q for q in self._consumers if q is not raw_queue)
 
     def start(self) -> None:
         if self.is_running:
@@ -92,4 +115,7 @@ class AcquisitionWorker:
                 continue
 
             consecutive_errors = 0
-            self._raw_queue.put_drop_oldest(iq)
+            # Every consumer gets the same array; blocks are treated as
+            # read-only downstream so no copy is needed per chain.
+            for consumer in self._consumers:
+                consumer.put_drop_oldest(iq)

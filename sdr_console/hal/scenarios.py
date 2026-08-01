@@ -62,10 +62,7 @@ class SweepMockDevice(MockSDRDevice):
         if num_samples <= 0:
             raise ValueError("num_samples must be positive")
 
-        if self._realtime:
-            import time
-
-            time.sleep(num_samples / self._sample_rate_hz)
+        self._pace(num_samples)
 
         t0 = self._sample_index / self._sample_rate_hz
         sample_times = t0 + np.arange(num_samples, dtype=np.float64) / self._sample_rate_hz
@@ -205,10 +202,7 @@ class AMMockDevice(MockSDRDevice):
         if num_samples <= 0:
             raise ValueError("num_samples must be positive")
 
-        if self._realtime:
-            import time
-
-            time.sleep(num_samples / self._sample_rate_hz)
+        self._pace(num_samples)
 
         indices = np.arange(num_samples, dtype=np.float64)
         noise = self._noise_amplitude * (

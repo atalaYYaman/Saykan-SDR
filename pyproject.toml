@@ -25,6 +25,9 @@ dev = [
 pluto = [
     "pyadi-iio>=0.0.19",
 ]
+audio = [
+    "sounddevice>=0.4",
+]
 
 [project.scripts]
 sdr-console = "sdr_console.__main__:main"

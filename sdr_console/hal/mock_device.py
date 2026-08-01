@@ -76,6 +76,7 @@ class MockSDRDevice(SDRDeviceInterface):
         self._realtime = realtime
         self._connected = False
         self._sample_index = 0
+        self._stream_start_s: float | None = None
         self._tones = tones if tones is not None else default_tones(center_freq_hz)
 
         self._capabilities.validate_freq_hz(center_freq_hz)
@@ -113,6 +114,7 @@ class MockSDRDevice(SDRDeviceInterface):
     def connect(self) -> None:
         self._connected = True
         self._sample_index = 0
+        self._stream_start_s = None
 
     def disconnect(self) -> None:
         self._connected = False
@@ -129,14 +131,31 @@ class MockSDRDevice(SDRDeviceInterface):
         self._capabilities.validate_gain_db(gain_db)
         self._gain_db = gain_db
 
+    def _pace(self, num_samples: int) -> None:
+        """Block until these samples would have arrived on a real device.
+
+        Waits against an absolute schedule instead of sleeping per block: the OS
+        timer overshoots short sleeps, and per-block sleeps let that overshoot
+        accumulate until the stream runs slower than its own sample rate — which
+        starves anything downstream that plays in real time, such as audio.
+        """
+        if not self._realtime:
+            return
+        if self._stream_start_s is None:
+            self._stream_start_s = time.monotonic()
+
+        due_s = self._stream_start_s + (self._sample_index + num_samples) / self._sample_rate_hz
+        delay_s = due_s - time.monotonic()
+        if delay_s > 0.0:
+            time.sleep(delay_s)
+
     def read_samples(self, num_samples: int) -> np.ndarray:
         if not self._connected:
             raise RuntimeError("MockSDRDevice is not connected")
         if num_samples <= 0:
             raise ValueError("num_samples must be positive")
 
-        if self._realtime:
-            time.sleep(num_samples / self._sample_rate_hz)
+        self._pace(num_samples)
 
         sample_indices = self._sample_index + np.arange(num_samples, dtype=np.float64)
         signal = np.zeros(num_samples, dtype=np.complex128)

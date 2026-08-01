@@ -7,9 +7,13 @@ import pytest
 
 from sdr_console.dsp.audio import (
     apply_iir,
+    choose_total_decimation,
     clip_audio,
     design_dc_blocker,
+    is_smooth,
     plan_audio_decimation,
+    plan_demod_chain,
+    split_decimation,
 )
 
 
@@ -48,6 +52,106 @@ def test_plan_audio_decimation_rejects_non_positive_rates(bad_value: float) -> N
         plan_audio_decimation(bad_value, 48_000.0)
     with pytest.raises(ValueError):
         plan_audio_decimation(48_000.0, bad_value)
+
+
+def test_plan_audio_decimation_accepts_a_forced_factor() -> None:
+    plan = plan_audio_decimation(204_800.0, 48_000.0, decimation=8)
+
+    assert plan.decimation == 8
+    assert plan.audio_rate_hz == pytest.approx(25_600.0)
+
+
+@pytest.mark.parametrize(
+    ("total", "max_first", "expected"),
+    [
+        (42, 10, (7, 6)),
+        (42, 5, (3, 14)),
+        (42, 100, (42, 1)),
+        (42, 1, (1, 42)),
+        (1, 8, (1, 1)),
+        (49, 6, (1, 49)),
+    ],
+)
+def test_split_decimation_takes_the_largest_allowed_divisor(
+    total: int,
+    max_first: int,
+    expected: tuple[int, int],
+) -> None:
+    first, second = split_decimation(total, max_first)
+
+    assert (first, second) == expected
+    assert first * second == total
+
+
+@pytest.mark.parametrize(("total", "max_first"), [(0, 4), (4, 0)])
+def test_split_decimation_rejects_non_positive_arguments(
+    total: int,
+    max_first: int,
+) -> None:
+    with pytest.raises(ValueError):
+        split_decimation(total, max_first)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(42, True), (43, False), (1, True), (49, True), (44, False), (0, False)],
+)
+def test_is_smooth_accepts_only_small_prime_factors(value: int, expected: bool) -> None:
+    assert is_smooth(value) is expected
+
+
+def test_choose_total_decimation_prefers_a_factor_rich_number() -> None:
+    # 2.048 Msps / 48 kHz is 42.67 and 43 is prime, which would leave nothing to
+    # split between the two stages.
+    assert choose_total_decimation(2_048_000.0, 48_000.0) == 42
+    assert choose_total_decimation(2_400_000.0, 48_000.0) == 50
+    assert choose_total_decimation(250_000.0, 48_000.0) == 5
+
+
+def test_choose_total_decimation_stays_within_tolerance() -> None:
+    total = choose_total_decimation(2_048_000.0, 48_000.0)
+    audio_rate_hz = 2_048_000.0 / total
+
+    assert abs(audio_rate_hz - 48_000.0) / 48_000.0 < 0.2
+
+
+def test_choose_total_decimation_is_one_below_the_audio_rate() -> None:
+    assert choose_total_decimation(32_000.0, 48_000.0) == 1
+
+
+@pytest.mark.parametrize("bandwidth_hz", [10_000.0, 125_000.0, 200_000.0, 350_000.0])
+def test_plan_demod_chain_keeps_the_audio_rate_constant(bandwidth_hz: float) -> None:
+    plan = plan_demod_chain(2_048_000.0, bandwidth_hz, 48_000.0)
+
+    # Constant audio rate is what lets the sound card stay open while the user
+    # changes bandwidth.
+    assert plan.audio_rate_hz == pytest.approx(2_048_000.0 / 42)
+    assert plan.total_decimation == 42
+    # The IF stage must still leave room for the requested bandwidth.
+    assert plan.if_rate_hz >= bandwidth_hz
+
+
+def test_plan_demod_chain_gives_the_channel_stage_as_much_as_it_can() -> None:
+    narrow = plan_demod_chain(2_048_000.0, 10_000.0, 48_000.0)
+    wide = plan_demod_chain(2_048_000.0, 350_000.0, 48_000.0)
+
+    assert narrow.channel.decimation == 42
+    assert narrow.audio_decimation == 1
+    assert wide.channel.decimation < narrow.channel.decimation
+    assert wide.audio_decimation > narrow.audio_decimation
+
+
+@pytest.mark.parametrize(
+    ("sample_rate_hz", "bandwidth_hz", "audio_rate_hz"),
+    [(0.0, 10_000.0, 48_000.0), (2_048_000.0, 0.0, 48_000.0), (2_048_000.0, 1e4, 0.0)],
+)
+def test_plan_demod_chain_rejects_non_positive_arguments(
+    sample_rate_hz: float,
+    bandwidth_hz: float,
+    audio_rate_hz: float,
+) -> None:
+    with pytest.raises(ValueError):
+        plan_demod_chain(sample_rate_hz, bandwidth_hz, audio_rate_hz)
 
 
 def test_dc_blocker_removes_a_constant_but_keeps_a_tone() -> None:

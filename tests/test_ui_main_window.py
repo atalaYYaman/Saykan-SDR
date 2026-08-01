@@ -8,11 +8,30 @@ from pathlib import Path
 import pytest
 from PyQt6.QtCore import Qt
 
+from sdr_console.audio.sink import NullAudioSink
 from sdr_console.config.app_config import AppConfig
 from sdr_console.config.storage import load_config
+from sdr_console.ui import main_window as main_window_module
 from sdr_console.ui.main_window import MainWindow
 
 pytest.importorskip("pytestqt")
+
+
+def _use_fake_audio_sink(monkeypatch: pytest.MonkeyPatch) -> list[NullAudioSink]:
+    """Make the window build audio chains that never open the sound card."""
+    sinks: list[NullAudioSink] = []
+    real_chain = main_window_module.AudioChain
+
+    def sink_factory(rate_hz: float, queue) -> NullAudioSink:
+        sink = NullAudioSink(rate_hz, queue)
+        sinks.append(sink)
+        return sink
+
+    def build_chain(**kwargs):
+        return real_chain(sink_factory=sink_factory, **kwargs)
+
+    monkeypatch.setattr(main_window_module, "AudioChain", build_chain)
+    return sinks
 
 
 def _type_bandwidth(window: MainWindow, text: str) -> None:
@@ -147,6 +166,104 @@ def test_close_event_persists_listening_channel(
     loaded = load_config(tmp_config_path)
     assert loaded.listen_freq_hz == target_hz
     assert loaded.channel_bandwidth_hz == window._channel.bandwidth_hz
+
+
+def test_audio_toggle_while_idle_waits_for_the_stream(window: MainWindow) -> None:
+    window._audio_check.setChecked(True)
+
+    assert window._audio_requested
+    assert window._audio_chain is None
+    assert "stream" in window._status_label.text().lower()
+
+
+def test_volume_slider_updates_config_and_label(window: MainWindow) -> None:
+    window._volume_slider.setValue(35)
+
+    assert window._config.audio_volume == pytest.approx(0.35)
+    assert window._volume_label.text() == "35%"
+
+
+def test_audio_starts_with_the_stream_and_stops_with_it(
+    window: MainWindow,
+    qtbot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sinks = _use_fake_audio_sink(monkeypatch)
+    window._audio_check.setChecked(True)
+
+    qtbot.mouseClick(window._start_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: window._pipeline.is_running, timeout=5000)
+    qtbot.waitUntil(lambda: window._audio_chain is not None, timeout=5000)
+
+    chain = window._audio_chain
+    assert chain is not None
+    assert chain.is_running
+    assert sinks[0].sample_rate_hz == pytest.approx(chain.worker.audio_rate_hz())
+    assert "audio" in window._streaming_status_text().lower()
+
+    qtbot.mouseClick(window._stop_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: not window._pipeline.is_running, timeout=5000)
+
+    assert window._audio_chain is None
+    assert not chain.is_running
+    # Intent survives the stop, so the next Start plays again.
+    assert window._audio_requested
+
+
+def test_volume_change_while_playing_reaches_the_sink(
+    window: MainWindow,
+    qtbot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sinks = _use_fake_audio_sink(monkeypatch)
+    window._audio_check.setChecked(True)
+    qtbot.mouseClick(window._start_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: window._audio_chain is not None, timeout=5000)
+
+    window._volume_slider.setValue(20)
+
+    assert sinks[0].volume == pytest.approx(0.2)
+    window.close()
+
+
+def test_bandwidth_change_keeps_the_audio_stream_open(
+    window: MainWindow,
+    qtbot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sinks = _use_fake_audio_sink(monkeypatch)
+    window._audio_check.setChecked(True)
+    qtbot.mouseClick(window._start_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: window._audio_chain is not None, timeout=5000)
+
+    index = window._bandwidth_combo.findData(200_000.0)
+    window._bandwidth_combo.setCurrentIndex(index)
+
+    chain = window._audio_chain
+    assert chain is not None
+    assert chain.worker.channel.bandwidth_hz == 200_000.0
+    # Only one sink was ever created: the stream was not reopened.
+    assert len(sinks) == 1
+    window.close()
+
+
+def test_audio_chain_follows_the_listening_frequency(
+    window: MainWindow,
+    qtbot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_fake_audio_sink(monkeypatch)
+    window._audio_check.setChecked(True)
+    qtbot.mouseClick(window._start_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: window._audio_chain is not None, timeout=5000)
+
+    target_hz = window._device.center_freq_hz + 300_000.0
+    window._display.frequency_selected.emit(target_hz)
+
+    chain = window._audio_chain
+    assert chain is not None
+    assert chain.worker.channel.center_freq_hz == pytest.approx(target_hz)
+    window.close()
 
 
 def test_invalid_saved_config_does_not_crash(qtbot, tmp_path: Path) -> None:

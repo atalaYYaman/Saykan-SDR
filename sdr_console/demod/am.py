@@ -34,6 +34,7 @@ class AMDemodulator(Demodulator):
         preferred_audio_rate_hz: float = DEFAULT_AUDIO_RATE_HZ,
         dc_cutoff_hz: float = DEFAULT_DC_CUTOFF_HZ,
         gain: float = 1.0,
+        audio_decimation: int | None = None,
     ) -> None:
         if input_rate_hz <= 0.0:
             raise ValueError("input_rate_hz must be positive")
@@ -42,7 +43,11 @@ class AMDemodulator(Demodulator):
 
         self._input_rate_hz = float(input_rate_hz)
         self._gain = float(gain)
-        self._plan = plan_audio_decimation(self._input_rate_hz, preferred_audio_rate_hz)
+        self._plan = plan_audio_decimation(
+            self._input_rate_hz,
+            preferred_audio_rate_hz,
+            decimation=audio_decimation,
+        )
         self._dc_b, self._dc_a = design_dc_blocker(self._input_rate_hz, dc_cutoff_hz)
 
         self._dc_state: np.ndarray | None = None

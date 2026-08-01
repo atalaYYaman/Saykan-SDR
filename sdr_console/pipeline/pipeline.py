@@ -65,6 +65,25 @@ class Pipeline:
         return self._output_queue
 
     @property
+    def read_chunk_size(self) -> int:
+        return self._read_chunk_size
+
+    def add_raw_consumer(self, maxsize: int = 8) -> SampleQueue[np.ndarray]:
+        """Create a queue that also receives every acquired IQ block.
+
+        Used to run a second chain (demodulation) on the same samples; it can be
+        added and removed while the pipeline is running.
+        """
+        raw_queue: SampleQueue[np.ndarray] = SampleQueue(maxsize=maxsize)
+        self._acquisition.add_consumer(raw_queue)
+        return raw_queue
+
+    def remove_raw_consumer(self, raw_queue: SampleQueue[np.ndarray]) -> None:
+        """Stop feeding a queue created by :meth:`add_raw_consumer`."""
+        self._acquisition.remove_consumer(raw_queue)
+        raw_queue.drain()
+
+    @property
     def is_running(self) -> bool:
         return self._acquisition.is_running or self._processing.is_running
 

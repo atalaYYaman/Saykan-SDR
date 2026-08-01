@@ -8,6 +8,7 @@ from pathlib import Path
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QCloseEvent
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -17,10 +18,13 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QPushButton,
+    QSlider,
     QVBoxLayout,
     QWidget,
 )
 
+from sdr_console.audio.errors import AudioError
+from sdr_console.audio.sink import sounddevice_available
 from sdr_console.config.app_config import AppConfig
 from sdr_console.config.storage import save_config
 from sdr_console.dsp.channel import MIN_CHANNEL_BANDWIDTH_HZ, ChannelSpec
@@ -34,7 +38,9 @@ from sdr_console.hal.registry import (
     device_availability,
     is_known_device_id,
 )
+from sdr_console.pipeline.audio_chain import AudioChain
 from sdr_console.pipeline.pipeline import Pipeline
+from sdr_console.pipeline.sample_queue import SampleQueue
 from sdr_console.ui.connect_worker import ConnectWorker
 from sdr_console.ui.devices import device_create_kwargs
 from sdr_console.viz.sdr_display import SdrDisplayWidget
@@ -81,6 +87,10 @@ class MainWindow(QMainWindow):
         self._connect_worker: ConnectWorker | None = None
         self._connecting = False
         self._vfo_label: QLabel | None = None
+        self._audio_chain: AudioChain | None = None
+        self._audio_raw_queue: SampleQueue | None = None
+        # Intent, not state: audio waits for the stream if it is not running yet.
+        self._audio_requested = False
 
         if not is_known_device_id(self._config.device_id):
             self._status_warning = f"Unknown device '{self._config.device_id}'; using Mock"
@@ -149,6 +159,9 @@ class MainWindow(QMainWindow):
         return Pipeline(
             device=self._device,
             fft_size=self._config.fft_size,
+            # Read well above the FFT size: audio needs milliseconds of samples
+            # per block, and larger reads keep per-block overhead off both chains.
+            read_chunk_size=max(self._config.fft_size, self._config.rx_buffer_size),
             output_queue_maxsize=self._runtime_defaults.queue_maxsize,
             raw_queue_maxsize=self._runtime_defaults.raw_queue_maxsize,
             on_error=self._on_pipeline_error,
@@ -294,6 +307,27 @@ class MainWindow(QMainWindow):
         tuning_form.addRow("Listen (VFO)", self._vfo_label)
         root.addWidget(tuning_box)
 
+        audio_box = QGroupBox("Audio")
+        audio_row = QHBoxLayout(audio_box)
+        self._audio_check = QCheckBox("Enable")
+        available, detail = sounddevice_available()
+        self._audio_check.setEnabled(available)
+        self._audio_check.setToolTip(
+            f"Output: {detail}" if available else f"Unavailable: {detail}"
+        )
+
+        self._volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self._volume_slider.setRange(0, 100)
+        self._volume_slider.setMaximumWidth(220)
+        self._volume_label = QLabel()
+
+        audio_row.addWidget(self._audio_check)
+        audio_row.addWidget(QLabel("Volume:"))
+        audio_row.addWidget(self._volume_slider)
+        audio_row.addWidget(self._volume_label)
+        audio_row.addStretch()
+        root.addWidget(audio_box)
+
         display_box = QGroupBox("Display")
         display_form = QFormLayout(display_box)
         self._vmin_spin = QDoubleSpinBox()
@@ -345,6 +379,8 @@ class MainWindow(QMainWindow):
             bandwidth_edit.editingFinished.connect(self._on_bandwidth_changed)
         self._vmin_spin.valueChanged.connect(self._on_display_levels_changed)
         self._vmax_spin.valueChanged.connect(self._on_display_levels_changed)
+        self._audio_check.toggled.connect(self._on_audio_toggled)
+        self._volume_slider.valueChanged.connect(self._on_volume_changed)
 
     def _sync_controls_from_config(self) -> None:
         widgets = (
@@ -357,6 +393,7 @@ class MainWindow(QMainWindow):
             self._gain_mode_combo,
             self._bandwidth_combo,
             self._uri_edit,
+            self._volume_slider,
         )
         for widget in widgets:
             widget.blockSignals(True)
@@ -384,6 +421,7 @@ class MainWindow(QMainWindow):
 
         self._vmin_spin.setValue(self._config.display_vmin_db)
         self._vmax_spin.setValue(self._config.display_vmax_db)
+        self._volume_slider.setValue(int(round(self._config.audio_volume * 100)))
 
         for widget in widgets:
             widget.blockSignals(False)
@@ -391,6 +429,7 @@ class MainWindow(QMainWindow):
         self._update_gain_spin_enabled()
         self._sync_bandwidth_combo()
         self._update_vfo_label()
+        self._update_volume_label()
 
     def _update_vfo_label(self) -> None:
         if self._vfo_label is None:
@@ -465,6 +504,74 @@ class MainWindow(QMainWindow):
         self._config.channel_bandwidth_hz = clamped.bandwidth_hz
         self._display.set_channel(clamped)
         self._update_vfo_label()
+        if self._audio_chain is not None:
+            self._audio_chain.set_channel(clamped)
+
+    def _update_volume_label(self) -> None:
+        self._volume_label.setText(f"{self._volume_slider.value()}%")
+
+    def _on_volume_changed(self, value: int) -> None:
+        self._config.audio_volume = value / 100.0
+        self._update_volume_label()
+        if self._audio_chain is not None:
+            self._audio_chain.set_volume(self._config.audio_volume)
+
+    def _on_audio_toggled(self, checked: bool) -> None:
+        self._audio_requested = checked
+        if not checked:
+            self._stop_audio()
+            self._set_idle_or_streaming_status()
+            return
+        if not self._pipeline.is_running:
+            self._status_label.setText("Audio will start with the stream")
+            return
+        self._start_audio()
+
+    def _start_audio(self) -> None:
+        """Attach a listening chain to the running pipeline."""
+        if self._audio_chain is not None or not self._pipeline.is_running:
+            return
+
+        raw_queue = self._pipeline.add_raw_consumer(
+            maxsize=self._runtime_defaults.raw_queue_maxsize
+        )
+        chain = AudioChain(
+            device=self._device,
+            raw_queue=raw_queue,
+            channel=self._channel,
+            preferred_audio_rate_hz=DEMOD_TARGET_RATE_HZ,
+            volume=self._config.audio_volume,
+        )
+        try:
+            chain.start()
+        except AudioError as exc:
+            self._pipeline.remove_raw_consumer(raw_queue)
+            self._audio_requested = False
+            self._audio_check.blockSignals(True)
+            self._audio_check.setChecked(False)
+            self._audio_check.blockSignals(False)
+            self._status_label.setText(f"Audio unavailable: {exc}")
+            return
+
+        self._audio_chain = chain
+        self._audio_raw_queue = raw_queue
+        self._set_idle_or_streaming_status()
+
+    def _stop_audio(self) -> None:
+        chain = self._audio_chain
+        self._audio_chain = None
+        if chain is not None:
+            chain.stop()
+        if self._audio_raw_queue is not None:
+            self._pipeline.remove_raw_consumer(self._audio_raw_queue)
+            self._audio_raw_queue = None
+
+    def _restart_audio_if_running(self) -> None:
+        """Reopen the output stream after a change that moves the audio rate."""
+        if self._audio_chain is None:
+            return
+        self._stop_audio()
+        self._start_audio()
 
     def _on_frequency_selected(self, freq_hz: float) -> None:
         """User picked a frequency on the plots; UI state only (no retune)."""
@@ -489,7 +596,13 @@ class MainWindow(QMainWindow):
 
     def _streaming_status_text(self) -> str:
         name = self._device_combo.currentText() or self._active_device_id
-        return f"Streaming ({name})"
+        text = f"Streaming ({name})"
+        chain = self._audio_chain
+        if chain is not None and chain.sink is not None:
+            text += f" — audio {chain.sink.sample_rate_hz / 1_000.0:.1f} kHz"
+            if chain.underruns:
+                text += f", {chain.underruns} underruns"
+        return text
 
     def _on_start(self) -> None:
         if self._pipeline.is_running or self._connecting:
@@ -528,6 +641,8 @@ class MainWindow(QMainWindow):
         self._pipeline.start()
         self._refresh_timer.start()
         self._stop_button.setEnabled(True)
+        if self._audio_requested:
+            self._start_audio()
         self._status_label.setText(self._streaming_status_text())
 
     def _on_connect_failed(self, message: str) -> None:
@@ -547,6 +662,7 @@ class MainWindow(QMainWindow):
 
     def _on_stop(self) -> None:
         self._refresh_timer.stop()
+        self._stop_audio()
         self._pipeline.stop()
         try:
             self._device.disconnect()
@@ -618,6 +734,7 @@ class MainWindow(QMainWindow):
             return
 
         self._capture_config_from_ui()
+        self._stop_audio()
         self._active_device_id = device_id
         self._config.device_id = device_id
         self._device = self._create_device(device_id)
@@ -745,6 +862,8 @@ class MainWindow(QMainWindow):
             self._status_label.setText(str(exc))
             return
         self._sync_display_tuning()
+        # The audio rate follows the sample rate, so the stream must be reopened.
+        self._restart_audio_if_running()
         self._set_idle_or_streaming_status()
 
     def _on_sample_rate_edited(self, text: str) -> None:
@@ -773,6 +892,7 @@ class MainWindow(QMainWindow):
 
         self._config.fft_size = int(size)
         was_connected = self._device.is_connected
+        self._stop_audio()
         self._pipeline.stop()
         self._pipeline = self._build_pipeline()
 
@@ -843,6 +963,7 @@ class MainWindow(QMainWindow):
         self._config.display_vmax_db = self._vmax_spin.value()
         self._config.listen_freq_hz = self._channel.center_freq_hz
         self._config.channel_bandwidth_hz = self._channel.bandwidth_hz
+        self._config.audio_volume = self._volume_slider.value() / 100.0
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 — Qt API
         if self._connect_worker is not None and self._connect_worker.isRunning():

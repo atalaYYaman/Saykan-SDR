@@ -2,10 +2,14 @@
 
 from sdr_console.dsp.audio import (
     AudioDecimationPlan,
+    DemodChainPlan,
     apply_iir,
+    choose_total_decimation,
     clip_audio,
     design_dc_blocker,
     plan_audio_decimation,
+    plan_demod_chain,
+    split_decimation,
 )
 from sdr_console.dsp.axis import (
     band_edges_hz,
@@ -39,6 +43,7 @@ __all__ = [
     "MIN_CHANNEL_BANDWIDTH_HZ",
     "AudioDecimationPlan",
     "ChannelSpec",
+    "DemodChainPlan",
     "ChannelizedBlock",
     "ChannelizerPlan",
     "ChannelizerState",
@@ -49,6 +54,7 @@ __all__ = [
     "bin_to_freq_hz",
     "channelize",
     "choose_decimation",
+    "choose_total_decimation",
     "clamp_freq_to_band",
     "clip_audio",
     "compute_fft",
@@ -62,5 +68,7 @@ __all__ = [
     "frequency_shift",
     "plan_audio_decimation",
     "plan_channelizer",
+    "plan_demod_chain",
+    "split_decimation",
     "to_db",
 ]

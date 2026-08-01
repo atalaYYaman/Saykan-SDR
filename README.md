@@ -42,12 +42,32 @@ when pushing sample rate.
 RTL-SDR and HackRF appear in the device list as skeletons (greyed out until
 their libraries and streaming paths are completed).
 
+## Listening (audio)
+
+Demodulated audio needs the optional audio extra:
+
+```bash
+pip install -e ".[audio]"
+```
+
+Tick **Audio → Enable**, then **Start**. The listening channel is the highlighted
+box on the spectrum: click the plots or drag the box to move it, and set its
+width with **Bandwidth**. Without the extra the console still runs; only the
+audio checkbox stays disabled.
+
+The demodulation chain runs beside the display chain on the same IQ stream, so a
+lagging waterfall never interrupts audio. Its sample rate follows the device rate
+(2.048 Msps gives 48.8 kHz audio) and the output stream is opened at exactly that
+rate, which avoids resampling on our side.
+
 ## Architecture
 
 Layered layout under `sdr_console/`:
 
 - `hal/` — device drivers (mock, Pluto, file playback, scenarios)
-- `dsp/` — numpy/scipy signal processing (dBFS spectrum frames)
+- `dsp/` — numpy/scipy signal processing (dBFS spectrum frames, channelizer)
+- `demod/` — demodulation modes (AM today), baseband IQ to mono audio
+- `audio/` — sound card output via `sounddevice`
 - `pipeline/` — worker threads and drop-oldest queues
 - `viz/` — pyqtgraph widgets
 - `ui/` — PyQt6 main window
