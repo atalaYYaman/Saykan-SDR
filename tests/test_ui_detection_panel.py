@@ -1,0 +1,118 @@
+"""UI tests for DetectionPanel table usability and pop-out."""
+
+from __future__ import annotations
+
+import pytest
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QSizePolicy
+
+from sdr_console.detect.identified import IdentifiedPeak
+from sdr_console.ui.detection_panel import DetectionPanel
+
+pytest.importorskip("pytestqt")
+
+
+def _peak(
+    *,
+    name: str,
+    frequency_hz: float,
+    power_db: float,
+    detection_count: int,
+) -> IdentifiedPeak:
+    return IdentifiedPeak(
+        name=name,
+        frequency_hz=frequency_hz,
+        power_db=power_db,
+        capture_gain_db=20.0,
+        detection_count=detection_count,
+    )
+
+
+@pytest.fixture
+def panel(qtbot) -> DetectionPanel:
+    widget = DetectionPanel()
+    qtbot.addWidget(widget)
+    widget.show()
+    return widget
+
+
+def test_empty_placeholder_visible_when_no_peaks(panel: DetectionPanel) -> None:
+    assert panel._table_stack.currentWidget() is panel._placeholder
+    assert "Henüz sinyal tespit edilmedi" in panel._placeholder.text()
+
+
+def test_table_preserves_detection_order(panel: DetectionPanel) -> None:
+    assert panel.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Expanding
+    assert panel._table.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Expanding
+
+    panel.update_peaks(
+        [
+            _peak(name="B", frequency_hz=100e6, power_db=-10.0, detection_count=2),
+            _peak(name="A", frequency_hz=90e6, power_db=-5.0, detection_count=1),
+        ]
+    )
+    assert panel._table_stack.currentWidget() is panel._table
+    assert not panel._table.isSortingEnabled()
+    assert panel._table.item(0, 0).text() == "100.000"
+    assert panel._table.item(1, 0).text() == "90.000"
+    assert panel._table.item(0, 3).text() == "2"
+    assert panel._table.item(1, 3).text() == "1"
+
+
+def test_popout_moves_table_and_restores(panel: DetectionPanel, qtbot) -> None:
+    panel.update_peaks(
+        [_peak(name="A", frequency_hz=97e6, power_db=-20.0, detection_count=1)]
+    )
+    qtbot.mouseClick(panel._popout_button, Qt.MouseButton.LeftButton)
+    assert panel._popout is not None
+    assert panel._popout.isVisible()
+    assert panel._dock_placeholder.isVisible()
+    assert panel._table_stack.parentWidget() is panel._popout
+    assert panel._table_stack.currentWidget() is panel._table
+    assert panel._table.isVisible()
+    assert panel._table.item(0, 0).text() == "97.000"
+    assert panel._popout_button.text() == "Geri Al"
+
+    panel._popout.close()
+    qtbot.waitUntil(lambda: panel._popout is None)
+    assert panel._table_stack.parentWidget() is panel._list_host
+    assert panel._table_stack.currentWidget() is panel._table
+    assert not panel._dock_placeholder.isVisible()
+    assert panel._popout_button.text() == "Büyüt"
+
+
+def test_frequency_cell_emits_tune_signal(panel: DetectionPanel, qtbot) -> None:
+    panel.update_peaks(
+        [_peak(name="A", frequency_hz=97_000_000.0, power_db=-20.0, detection_count=1)]
+    )
+
+    with qtbot.waitSignal(panel.frequency_selected, timeout=1000) as blocker:
+        panel._table.cellClicked.emit(0, 0)
+
+    assert blocker.args == [97_000_000.0]
+
+
+def test_update_peaks_skips_redundant_rebuild(panel: DetectionPanel) -> None:
+    peaks = [_peak(name="A", frequency_hz=97e6, power_db=-20.0, detection_count=1)]
+    panel.update_peaks(peaks)
+    first_item = panel._table.item(0, 0)
+    panel.update_peaks(peaks)
+    assert panel._table.item(0, 0) is first_item
+
+
+def test_popout_shows_empty_placeholder(panel: DetectionPanel, qtbot) -> None:
+    qtbot.mouseClick(panel._popout_button, Qt.MouseButton.LeftButton)
+    assert panel._popout is not None
+    assert panel._table_stack.currentWidget() is panel._placeholder
+    assert panel._placeholder.isVisible()
+    assert "Henüz sinyal tespit edilmedi" in panel._placeholder.text()
+    panel._popout.close()
+
+
+def test_detection_controls_have_explanatory_tooltips(panel: DetectionPanel) -> None:
+    threshold_tip = panel._threshold_spin.toolTip()
+    merge_tip = panel._merge_bandwidth_spin.toolTip()
+    assert "aday sinyal" in threshold_tip
+    assert "birle" in merge_tip.casefold()
+    assert "Eşik" in panel._controls_hint.text() or "Esik" in panel._controls_hint.text()
+    assert "Birleştirme mesafesi" in panel._controls_hint.text() or "Birlestirme mesafesi" in panel._controls_hint.text()

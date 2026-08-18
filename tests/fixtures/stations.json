@@ -1,0 +1,7 @@
+{
+  "97000000": "TRT FM",
+  "100700000": "TRT Radyo 1",
+  "stations": [
+    {"frequency_mhz": 101.5, "name": "Power FM"}
+  ]
+}

@@ -80,7 +80,7 @@ def test_app_config_v3_channel_fields_and_migration() -> None:
     )
     assert migrated.config_version == CONFIG_VERSION
     assert migrated.listen_freq_hz == 120e6
-    assert migrated.channel_bandwidth_hz == 200_000.0
+    assert migrated.channel_bandwidth_hz == 10_000.0
     assert migrated.demod_mode == "AM"
 
     explicit = AppConfig.from_dict(
@@ -102,6 +102,32 @@ def test_app_config_v3_channel_fields_and_migration() -> None:
     assert explicit.gain_step_db == 0.5
 
 
+def test_app_config_v4_window_state_migration() -> None:
+    migrated = AppConfig.from_dict({"config_version": 3, "device_id": "mock"})
+    assert migrated.config_version == CONFIG_VERSION
+    assert migrated.window_state == ""
+
+    explicit = AppConfig.from_dict(
+        {
+            "config_version": CONFIG_VERSION,
+            "window_state": "dGVzdA==",
+        }
+    )
+    assert explicit.window_state == "dGVzdA=="
+
+
+def test_app_config_v5_resets_stale_layout_version() -> None:
+    migrated = AppConfig.from_dict(
+        {
+            "config_version": 4,
+            "window_state": "dGVzdA==",
+        }
+    )
+    assert migrated.config_version == CONFIG_VERSION
+    assert migrated.window_layout_version == 0
+    assert migrated.window_state == "dGVzdA=="
+
+
 def test_app_config_sanitizes_channel_and_audio_fields() -> None:
     config = AppConfig.from_dict(
         {
@@ -113,11 +139,62 @@ def test_app_config_sanitizes_channel_and_audio_fields() -> None:
         }
     )
 
-    assert config.channel_bandwidth_hz == 200_000.0
+    assert config.channel_bandwidth_hz == 10_000.0
     assert config.audio_volume == 1.0
     assert config.freq_step_hz > 0.0
     assert config.gain_step_db > 0.0
     assert config.demod_mode == "AM"
+
+
+def test_app_config_sanitizes_afbw_field() -> None:
+    config = AppConfig.from_dict({"afbw_hz": 0.0})
+    assert config.afbw_hz == 4_000.0
+
+    explicit = AppConfig.from_dict({"afbw_hz": 15_000.0})
+    assert explicit.afbw_hz == 15_000.0
+
+
+def test_app_config_sanitizes_squelch_fields() -> None:
+    config = AppConfig.from_dict(
+        {
+            "squelch_enabled": 1,
+            "squelch_threshold_db": -200.0,
+            "squelch_hysteresis_db": -1.0,
+            "squelch_hang_s": 99.0,
+        }
+    )
+    assert config.squelch_enabled is True
+    assert config.squelch_threshold_db == -50.0
+    assert config.squelch_hysteresis_db == 3.0
+    assert config.squelch_hang_s == 0.15
+
+    ok = AppConfig.from_dict(
+        {
+            "squelch_enabled": True,
+            "squelch_threshold_db": -35.0,
+            "squelch_hysteresis_db": 4.0,
+            "squelch_hang_s": 0.25,
+        }
+    )
+    assert ok.squelch_threshold_db == -35.0
+    assert ok.squelch_hysteresis_db == 4.0
+    assert ok.squelch_hang_s == 0.25
+
+
+def test_app_config_sanitizes_deemphasis_fields() -> None:
+    config = AppConfig.from_dict(
+        {
+            "deemphasis_tau_us": 99.0,
+            "nfm_deemphasis": 1,
+        }
+    )
+
+    assert config.deemphasis_tau_us == 75.0
+    assert config.nfm_deemphasis is True
+
+    explicit = AppConfig.from_dict({"deemphasis_tau_us": 50.0, "nfm_deemphasis": False})
+    assert explicit.deemphasis_tau_us == 50.0
+    assert explicit.nfm_deemphasis is False
 
 
 def test_app_config_sanitizes_unknown_demod_mode() -> None:

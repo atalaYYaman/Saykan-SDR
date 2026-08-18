@@ -153,6 +153,72 @@ def test_demod_worker_produces_the_modulating_tone(
     ) == pytest.approx(AUDIO_FREQ_HZ, rel=0.05)
 
 
+def test_demod_worker_squelch_mutes_when_channel_is_below_threshold(
+    am_device: AMMockDevice,
+    channel: ChannelSpec,
+) -> None:
+    raw_queue: SampleQueue[np.ndarray] = SampleQueue(maxsize=64)
+    audio_queue: SampleQueue[np.ndarray] = SampleQueue(maxsize=64)
+    worker = DemodWorker(
+        device=am_device,
+        raw_queue=raw_queue,
+        audio_queue=audio_queue,
+        channel=channel,
+        preferred_audio_rate_hz=AUDIO_RATE_HZ,
+        squelch_enabled=True,
+        # Unit-amplitude IF sits near 0 dBFS; this threshold never opens.
+        squelch_threshold_db=20.0,
+        squelch_hang_s=0.0,
+    )
+
+    feed(am_device, raw_queue, blocks=6)
+    worker.start()
+    drained = wait_until(lambda: raw_queue.qsize() == 0 and audio_queue.qsize() >= 4)
+    worker.stop()
+
+    chunks = []
+    while (block := audio_queue.try_get()) is not None:
+        chunks.append(block)
+    audio = np.concatenate(chunks)
+
+    assert drained
+    assert float(np.max(np.abs(audio))) == pytest.approx(0.0)
+
+
+def test_demod_worker_squelch_opens_for_a_strong_channel(
+    am_device: AMMockDevice,
+    channel: ChannelSpec,
+) -> None:
+    raw_queue: SampleQueue[np.ndarray] = SampleQueue(maxsize=64)
+    audio_queue: SampleQueue[np.ndarray] = SampleQueue(maxsize=64)
+    worker = DemodWorker(
+        device=am_device,
+        raw_queue=raw_queue,
+        audio_queue=audio_queue,
+        channel=channel,
+        preferred_audio_rate_hz=AUDIO_RATE_HZ,
+        squelch_enabled=True,
+        squelch_threshold_db=-80.0,
+        squelch_hang_s=0.0,
+    )
+
+    feed(am_device, raw_queue, blocks=8)
+    worker.start()
+    drained = wait_until(lambda: raw_queue.qsize() == 0 and audio_queue.qsize() >= 6)
+    worker.stop()
+
+    chunks = []
+    while (block := audio_queue.try_get()) is not None:
+        chunks.append(block)
+    audio = np.concatenate(chunks)
+
+    assert drained
+    assert float(np.max(np.abs(audio))) > 0.05
+    assert dominant_frequency_hz(
+        audio[audio.size // 4 :], worker.demodulator.audio_rate_hz
+    ) == pytest.approx(AUDIO_FREQ_HZ, rel=0.05)
+
+
 def test_demod_worker_audio_rate_is_independent_of_bandwidth(
     am_device: AMMockDevice,
     channel: ChannelSpec,

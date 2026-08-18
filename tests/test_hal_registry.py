@@ -14,8 +14,11 @@ from sdr_console.hal.registry import (
     create_device,
     device_availability,
     is_known_device_id,
+    static_capabilities,
 )
 from sdr_console.hal.scenarios import AMMockDevice
+from sdr_console.hal.mock_device import MOCK_CAPABILITIES
+from sdr_console.hal.pluto_device import PLUTO_CAPABILITIES
 
 
 def test_known_device_ids_include_hardware_entries() -> None:
@@ -26,6 +29,13 @@ def test_known_device_ids_include_hardware_entries() -> None:
     assert HACKRF_DEVICE_ID in KNOWN_DEVICE_IDS
     assert is_known_device_id(PLUTO_DEVICE_ID)
     assert not is_known_device_id("nope")
+
+
+def test_static_capabilities_cover_registered_devices() -> None:
+    assert static_capabilities(MOCK_DEVICE_ID) is MOCK_CAPABILITIES
+    assert static_capabilities(MOCK_AM_DEVICE_ID) is MOCK_CAPABILITIES
+    assert static_capabilities(PLUTO_DEVICE_ID) is PLUTO_CAPABILITIES
+    assert static_capabilities("nope") is None
 
 
 def test_device_choices_labels() -> None:

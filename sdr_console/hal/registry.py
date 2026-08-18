@@ -6,11 +6,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from sdr_console.hal.hackrf_device import HackRfDevice
+from sdr_console.hal.capabilities import DeviceCapabilities
+from sdr_console.hal.hackrf_device import HACKRF_CAPABILITIES, HackRfDevice
 from sdr_console.hal.interface import SDRDeviceInterface
-from sdr_console.hal.mock_device import MockSDRDevice
-from sdr_console.hal.pluto_device import PlutoSDRDevice
-from sdr_console.hal.rtlsdr_device import RtlSdrDevice
+from sdr_console.hal.mock_device import MOCK_CAPABILITIES, MockSDRDevice
+from sdr_console.hal.pluto_device import PLUTO_CAPABILITIES, PlutoSDRDevice
+from sdr_console.hal.rtlsdr_device import RTLSDR_CAPABILITIES, RtlSdrDevice
 from sdr_console.hal.scenarios import AM_TEST_OFFSET_HZ, am_tone
 
 MOCK_DEVICE_ID = "mock"
@@ -84,9 +85,26 @@ DEVICE_CHOICES: tuple[tuple[str, str], ...] = tuple(
 
 KNOWN_DEVICE_IDS: frozenset[str] = frozenset(_SPECS_BY_ID)
 
+_STATIC_CAPABILITIES: dict[str, DeviceCapabilities] = {
+    MOCK_DEVICE_ID: MOCK_CAPABILITIES,
+    MOCK_AM_DEVICE_ID: MOCK_CAPABILITIES,
+    PLUTO_DEVICE_ID: PLUTO_CAPABILITIES,
+    RTLSDR_DEVICE_ID: RTLSDR_CAPABILITIES,
+    HACKRF_DEVICE_ID: HACKRF_CAPABILITIES,
+}
+
 
 def is_known_device_id(device_id: str) -> bool:
     return device_id in KNOWN_DEVICE_IDS
+
+
+def static_capabilities(device_id: str) -> DeviceCapabilities | None:
+    """Return compile-time capability limits for ``device_id``, if known.
+
+    Used to clamp persisted config *before* constructing a driver so
+    out-of-range last-session values cannot abort startup.
+    """
+    return _STATIC_CAPABILITIES.get(device_id)
 
 
 def device_availability(device_id: str) -> tuple[bool, str]:

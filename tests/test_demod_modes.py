@@ -67,15 +67,25 @@ def test_fm_demodulator_recovers_the_modulating_tone(
 
     channel = ChannelSpec(CENTER_HZ + CARRIER_OFFSET_HZ, bandwidth_hz)
     plan = plan_channelizer(channel.bandwidth_hz, SAMPLE_RATE_HZ, 48_000.0)
-    demodulator = demod_cls(input_rate_hz=plan.output_rate_hz)
+    demodulator = demod_cls(
+        input_rate_hz=plan.output_rate_hz,
+        deemphasis=False,
+        agc_enabled=False,
+    )
 
     audio = demodulate_stream(device, demodulator, channel, plan)
     settled = audio[audio.size // 4 :]
     peak_hz = dominant_frequency_hz(settled, demodulator.audio_rate_hz)
 
     assert demodulator.mode == demod_cls.MODE
+    assert demodulator.peak_deviation_hz == peak_deviation_hz
     assert peak_hz == pytest.approx(AUDIO_FREQ_HZ, rel=0.08)
-    assert np.all(np.abs(audio) <= 1.0)
+    assert np.all(np.abs(audio) <= 1.0 + 1e-6)
+    settled_abs = np.abs(settled)
+    peak = float(np.percentile(settled_abs, 99))
+    rms = float(np.sqrt(np.mean(np.square(settled, dtype=np.float64))))
+    assert 0.55 <= peak <= 1.05
+    assert peak / max(rms, 1e-12) > 1.2
 
 
 @pytest.mark.parametrize(

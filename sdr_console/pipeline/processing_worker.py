@@ -36,10 +36,29 @@ class ProcessingWorker:
         self._poll_timeout_s = poll_timeout_s
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._consumers_lock = threading.Lock()
+        self._output_queues: tuple[SampleQueue[SpectrumFrame], ...] = (output_queue,)
 
     @property
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def output_queues(self) -> tuple[SampleQueue[SpectrumFrame], ...]:
+        """Queues currently receiving every processed spectrum frame."""
+        return self._output_queues
+
+    def add_consumer(self, output_queue: SampleQueue[SpectrumFrame]) -> None:
+        """Fan every spectrum frame out to ``output_queue`` as well."""
+        with self._consumers_lock:
+            if output_queue in self._output_queues:
+                return
+            self._output_queues = (*self._output_queues, output_queue)
+
+    def remove_consumer(self, output_queue: SampleQueue[SpectrumFrame]) -> None:
+        """Stop feeding ``output_queue``."""
+        with self._consumers_lock:
+            self._output_queues = tuple(q for q in self._output_queues if q is not output_queue)
 
     def start(self) -> None:
         if self.is_running:
@@ -75,4 +94,5 @@ class ProcessingWorker:
                 logger.exception("DSP processing failed; continuing")
                 continue
 
-            self._output_queue.put_drop_oldest(frame)
+            for consumer in self._output_queues:
+                consumer.put_drop_oldest(frame)

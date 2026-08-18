@@ -236,3 +236,40 @@ def apply_iir(
 def clip_audio(samples: np.ndarray) -> np.ndarray:
     """Clamp audio to the [-1, 1] range expected by the audio sink."""
     return np.clip(samples, -1.0, 1.0).astype(np.float32, copy=False)
+
+
+def soft_limit_audio(
+    samples: np.ndarray,
+    limit: float = 1.0,
+    knee: float = 0.1,
+) -> np.ndarray:
+    """Soft-limit toward ±``limit`` without hard square-wave rails.
+
+    Samples with ``|x| <= limit - knee`` pass through unchanged. Beyond that,
+    excess is compressed with a smooth exponential so the output approaches
+    ±``limit`` without flattening to a hard clipped rail for moderate
+    overshoot.
+
+    Args:
+        samples: Audio samples (any float dtype).
+        limit: Asymptotic bound; must be positive.
+        knee: Soft region width just below ``limit``; ``0`` falls back to hard
+            clip. Must satisfy ``0 <= knee < limit``.
+    """
+    if limit <= 0.0:
+        raise ValueError("limit must be positive")
+    if knee < 0.0 or knee >= limit:
+        raise ValueError("knee must satisfy 0 <= knee < limit")
+
+    x = np.asarray(samples, dtype=np.float64)
+    if knee == 0.0:
+        return np.clip(x, -limit, limit).astype(np.float32, copy=False)
+
+    sign = np.sign(x)
+    ax = np.abs(x)
+    linear_ceiling = limit - knee
+    excess = np.maximum(ax - linear_ceiling, 0.0)
+    # At the knee boundary: linear_ceiling; as excess → ∞: limit.
+    soft = linear_ceiling + knee * (1.0 - np.exp(-excess / knee))
+    out = np.where(ax > linear_ceiling, sign * soft, x)
+    return out.astype(np.float32, copy=False)

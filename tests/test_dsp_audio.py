@@ -13,6 +13,7 @@ from sdr_console.dsp.audio import (
     is_smooth,
     plan_audio_decimation,
     plan_demod_chain,
+    soft_limit_audio,
     split_decimation,
 )
 
@@ -200,3 +201,9 @@ def test_clip_audio_limits_the_range_and_returns_float32() -> None:
 
     assert clipped.dtype == np.float32
     np.testing.assert_allclose(clipped, np.array([-1.0, -0.5, 0.25, 1.0], dtype=np.float32))
+
+
+def test_soft_limit_audio_is_exported_from_dsp_package() -> None:
+    from sdr_console.dsp import soft_limit_audio as exported
+
+    assert exported is soft_limit_audio

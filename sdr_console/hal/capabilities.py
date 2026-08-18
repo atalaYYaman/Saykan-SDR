@@ -68,3 +68,35 @@ class DeviceCapabilities:
         if mode not in self.gain_modes:
             allowed = ", ".join(self.gain_modes)
             raise ValueError(f"Gain mode {mode!r} not supported; choose one of: {allowed}")
+
+    def clamp_freq_hz(self, freq_hz: float) -> float:
+        """Return ``freq_hz`` limited to ``[min_freq_hz, max_freq_hz]``."""
+        return min(max(float(freq_hz), self.min_freq_hz), self.max_freq_hz)
+
+    def clamp_gain_db(self, gain_db: float) -> float:
+        """Return ``gain_db`` limited to ``[min_gain_db, max_gain_db]``."""
+        return min(max(float(gain_db), self.min_gain_db), self.max_gain_db)
+
+    def clamp_sample_rate_hz(self, rate_hz: float) -> float:
+        """Return a valid sample rate closest to ``rate_hz``.
+
+        Continuous devices clamp to ``[min, max]``. Discrete devices pick the
+        nearest entry in ``supported_sample_rates_hz``.
+        """
+        rate = float(rate_hz)
+        if self.has_continuous_sample_rates:
+            assert self.min_sample_rate_hz is not None
+            assert self.max_sample_rate_hz is not None
+            return min(max(rate, self.min_sample_rate_hz), self.max_sample_rate_hz)
+
+        if not self.supported_sample_rates_hz:
+            return rate
+        if rate in self.supported_sample_rates_hz:
+            return rate
+        return min(self.supported_sample_rates_hz, key=lambda supported: abs(supported - rate))
+
+    def clamp_gain_mode(self, mode: str) -> str:
+        """Return ``mode`` if supported, otherwise the first listed gain mode."""
+        if mode in self.gain_modes:
+            return mode
+        return self.gain_modes[0] if self.gain_modes else "manual"

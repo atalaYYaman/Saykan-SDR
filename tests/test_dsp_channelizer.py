@@ -170,6 +170,41 @@ def test_channelize_suppresses_a_tone_outside_the_channel() -> None:
     assert 20.0 * np.log10(rejected_level / kept_level) < -40.0
 
 
+@pytest.mark.parametrize(
+    "bandwidth_hz",
+    [
+        500.0,  # CW
+        2_700.0,  # SSB
+        10_000.0,  # AM
+        12_500.0,  # N-FM
+        200_000.0,  # W-FM
+    ],
+)
+def test_mode_default_rfbw_keeps_in_band_and_rejects_out_of_band(
+    bandwidth_hz: float,
+) -> None:
+    """Synthetic tones: inside RFBW stays, outside is attenuated (A1)."""
+    channel = ChannelSpec(CENTER_HZ, bandwidth_hz)
+    plan = plan_channelizer(channel.bandwidth_hz, SAMPLE_RATE_HZ, TARGET_RATE_HZ)
+    half_bw = bandwidth_hz / 2.0
+    # Well inside the passband; well outside the stop edge.
+    inside_offset_hz = half_bw * 0.25
+    outside_offset_hz = max(bandwidth_hz * 4.0, half_bw + 50_000.0)
+
+    inside = make_tone(inside_offset_hz, BLOCK)
+    outside = make_tone(outside_offset_hz, BLOCK)
+
+    kept, _ = channelize(inside, channel, CENTER_HZ, SAMPLE_RATE_HZ, plan)
+    rejected, _ = channelize(outside, channel, CENTER_HZ, SAMPLE_RATE_HZ, plan)
+
+    settled = slice(plan.num_taps // plan.decimation + 1, None)
+    kept_level = float(np.mean(np.abs(kept.samples[settled])))
+    rejected_level = float(np.mean(np.abs(rejected.samples[settled])))
+
+    assert kept_level == pytest.approx(1.0, abs=0.15)
+    assert 20.0 * np.log10(rejected_level / max(kept_level, 1e-12)) < -35.0
+
+
 def test_channelize_streams_blocks_without_discontinuity() -> None:
     channel = ChannelSpec(CENTER_HZ + 120_000.0, 200_000.0)
     plan = plan_channelizer(channel.bandwidth_hz, SAMPLE_RATE_HZ, TARGET_RATE_HZ)

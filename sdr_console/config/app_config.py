@@ -7,12 +7,33 @@ import math
 from dataclasses import asdict, dataclass, fields
 
 from sdr_console.config.defaults import AppDefaults
-from sdr_console.demod.factory import is_known_demod_mode
+from sdr_console.demod.factory import (
+    default_afbw_hz,
+    default_agc_enabled,
+    default_agc_preset,
+    default_bandwidth_hz,
+    is_known_demod_mode,
+)
+from sdr_console.dsp.afbw import MAX_AFBW_HZ, MIN_AFBW_HZ
+from sdr_console.dsp.agc import AgcPreset
 from sdr_console.dsp.channel import MIN_CHANNEL_BANDWIDTH_HZ
+from sdr_console.dsp.squelch import (
+    DEFAULT_SQUELCH_HANG_S,
+    DEFAULT_SQUELCH_HYSTERESIS_DB,
+    DEFAULT_SQUELCH_THRESHOLD_DB,
+    MAX_SQUELCH_THRESHOLD_DB,
+    MIN_SQUELCH_THRESHOLD_DB,
+)
 from sdr_console.hal.registry import MOCK_DEVICE_ID, is_known_device_id
 
-CONFIG_VERSION = 3
+CONFIG_VERSION = 5
+WINDOW_LAYOUT_VERSION = 5
 DEFAULT_DEVICE_ID = MOCK_DEVICE_ID
+DEFAULT_DEMOD_MODE = "AM"
+DEFAULT_CHANNEL_BANDWIDTH_HZ = default_bandwidth_hz(DEFAULT_DEMOD_MODE)
+DEFAULT_AFBW_HZ = default_afbw_hz(DEFAULT_DEMOD_MODE)
+DEFAULT_AGC_ENABLED = default_agc_enabled(DEFAULT_DEMOD_MODE)
+DEFAULT_AGC_PRESET = default_agc_preset(DEFAULT_DEMOD_MODE)
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +58,22 @@ class AppConfig:
     gain_mode: str = "manual"
     rx_buffer_size: int = 16_384
     listen_freq_hz: float = 100_000_000.0
-    channel_bandwidth_hz: float = 200_000.0
-    demod_mode: str = "AM"
+    channel_bandwidth_hz: float = DEFAULT_CHANNEL_BANDWIDTH_HZ
+    demod_mode: str = DEFAULT_DEMOD_MODE
     audio_volume: float = 0.5
+    deemphasis_tau_us: float = 75.0
+    nfm_deemphasis: bool = False
+    afbw_hz: float = DEFAULT_AFBW_HZ
+    agc_enabled: bool = DEFAULT_AGC_ENABLED
+    agc_preset: str = DEFAULT_AGC_PRESET
+    squelch_enabled: bool = False
+    squelch_threshold_db: float = DEFAULT_SQUELCH_THRESHOLD_DB
+    squelch_hysteresis_db: float = DEFAULT_SQUELCH_HYSTERESIS_DB
+    squelch_hang_s: float = DEFAULT_SQUELCH_HANG_S
     freq_step_hz: float = 100_000.0
     gain_step_db: float = 1.0
+    window_state: str = ""
+    window_layout_version: int = WINDOW_LAYOUT_VERSION
 
     @classmethod
     def default(cls) -> AppConfig:
@@ -128,6 +160,11 @@ def _coerce_field(name: str, value: object) -> object:
         "listen_freq_hz",
         "channel_bandwidth_hz",
         "audio_volume",
+        "deemphasis_tau_us",
+        "afbw_hz",
+        "squelch_threshold_db",
+        "squelch_hysteresis_db",
+        "squelch_hang_s",
         "freq_step_hz",
         "gain_step_db",
     }:
@@ -139,14 +176,19 @@ def _coerce_field(name: str, value: object) -> object:
         "spectrum_plot_height",
         "config_version",
         "rx_buffer_size",
+        "window_layout_version",
     }:
         return int(value)  # type: ignore[arg-type]
+    if name in {"nfm_deemphasis", "agc_enabled", "squelch_enabled"}:
+        return bool(value)
     if name in {
         "device_id",
         "display_colormap",
         "device_uri",
         "gain_mode",
         "demod_mode",
+        "agc_preset",
+        "window_state",
     }:
         return str(value)
     return value
@@ -216,11 +258,74 @@ def _sanitize(config: AppConfig) -> AppConfig:
         config.audio_volume = AppConfig.default().audio_volume
     config.audio_volume = min(max(config.audio_volume, 0.0), 1.0)
 
+    if (
+        not math.isfinite(config.deemphasis_tau_us)
+        or config.deemphasis_tau_us not in (50.0, 75.0)
+    ):
+        logger.warning(
+            "deemphasis_tau_us %s is invalid; using 75",
+            config.deemphasis_tau_us,
+        )
+        config.deemphasis_tau_us = 75.0
+
+    config.nfm_deemphasis = bool(config.nfm_deemphasis)
+
+    if (
+        not math.isfinite(config.afbw_hz)
+        or config.afbw_hz < MIN_AFBW_HZ
+        or config.afbw_hz > MAX_AFBW_HZ
+    ):
+        logger.warning("afbw_hz %s is out of range; using default", config.afbw_hz)
+        config.afbw_hz = AppConfig.default().afbw_hz
+
+    config.agc_enabled = bool(config.agc_enabled)
+    try:
+        config.agc_preset = AgcPreset(str(config.agc_preset)).value
+    except ValueError:
+        logger.warning("agc_preset %r is unknown; using default", config.agc_preset)
+        config.agc_preset = AppConfig.default().agc_preset
+
+    config.squelch_enabled = bool(config.squelch_enabled)
+    if (
+        not math.isfinite(config.squelch_threshold_db)
+        or config.squelch_threshold_db < MIN_SQUELCH_THRESHOLD_DB
+        or config.squelch_threshold_db > MAX_SQUELCH_THRESHOLD_DB
+    ):
+        logger.warning(
+            "squelch_threshold_db %s is out of range; using default",
+            config.squelch_threshold_db,
+        )
+        config.squelch_threshold_db = DEFAULT_SQUELCH_THRESHOLD_DB
+
+    if (
+        not math.isfinite(config.squelch_hysteresis_db)
+        or config.squelch_hysteresis_db < 0.0
+        or config.squelch_hysteresis_db > 40.0
+    ):
+        config.squelch_hysteresis_db = DEFAULT_SQUELCH_HYSTERESIS_DB
+
+    if (
+        not math.isfinite(config.squelch_hang_s)
+        or config.squelch_hang_s < 0.0
+        or config.squelch_hang_s > 5.0
+    ):
+        config.squelch_hang_s = DEFAULT_SQUELCH_HANG_S
+
     if not math.isfinite(config.freq_step_hz) or config.freq_step_hz <= 0.0:
         config.freq_step_hz = AppConfig.default().freq_step_hz
 
     if not math.isfinite(config.gain_step_db) or config.gain_step_db <= 0.0:
         config.gain_step_db = AppConfig.default().gain_step_db
+
+    if config.window_state is None:
+        config.window_state = ""
+
+    try:
+        config.window_layout_version = int(config.window_layout_version)
+    except (TypeError, ValueError):
+        config.window_layout_version = 0
+    if config.window_layout_version < 0:
+        config.window_layout_version = 0
 
     return config
 
@@ -235,10 +340,18 @@ def _migrate(data: dict[str, object], from_version: int) -> dict[str, object]:
         payload.setdefault("rx_buffer_size", 16_384)
     if from_version < 3:
         payload.setdefault("listen_freq_hz", payload.get("center_freq_hz", 100_000_000.0))
-        payload.setdefault("channel_bandwidth_hz", 200_000.0)
-        payload.setdefault("demod_mode", "AM")
+        payload.setdefault("demod_mode", DEFAULT_DEMOD_MODE)
+        payload.setdefault(
+            "channel_bandwidth_hz",
+            default_bandwidth_hz(str(payload.get("demod_mode", DEFAULT_DEMOD_MODE))),
+        )
         payload.setdefault("audio_volume", 0.5)
         payload.setdefault("freq_step_hz", 100_000.0)
         payload.setdefault("gain_step_db", 1.0)
+    if from_version < 4:
+        payload.setdefault("window_state", "")
+    if from_version < 5:
+        # Eski yüzer dock yerleşimini geri yükleme.
+        payload["window_layout_version"] = 0
     payload["config_version"] = CONFIG_VERSION
     return payload

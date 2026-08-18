@@ -14,6 +14,13 @@ from sdr_console.demod.factory import default_demodulator_factory
 from sdr_console.dsp.audio import DemodChainPlan, plan_demod_chain
 from sdr_console.dsp.channel import ChannelSpec
 from sdr_console.dsp.channelizer import ChannelizerState, channelize
+from sdr_console.dsp.squelch import (
+    DEFAULT_SQUELCH_HANG_S,
+    DEFAULT_SQUELCH_HYSTERESIS_DB,
+    DEFAULT_SQUELCH_THRESHOLD_DB,
+    ChannelSquelch,
+    channel_power_db,
+)
 from sdr_console.pipeline.sample_queue import SampleQueue
 
 if TYPE_CHECKING:
@@ -26,7 +33,7 @@ DemodulatorFactory = Callable[[float, int], Demodulator]
 
 
 class DemodWorker:
-    """Second chain on the same raw IQ: channel filter, demodulate, enqueue audio.
+    """Second chain on the same raw IQ: channel filter, squelch, demodulate.
 
     Runs independently of the spectrum chain — it has its own raw queue, so
     neither chain waits for the other and audio keeps flowing while the display
@@ -42,6 +49,10 @@ class DemodWorker:
         preferred_audio_rate_hz: float,
         demodulator_factory: DemodulatorFactory = default_demodulator_factory,
         poll_timeout_s: float = 0.1,
+        squelch_enabled: bool = False,
+        squelch_threshold_db: float = DEFAULT_SQUELCH_THRESHOLD_DB,
+        squelch_hysteresis_db: float = DEFAULT_SQUELCH_HYSTERESIS_DB,
+        squelch_hang_s: float = DEFAULT_SQUELCH_HANG_S,
     ) -> None:
         self._device = device
         self._raw_queue = raw_queue
@@ -56,6 +67,12 @@ class DemodWorker:
         self._settings_lock = threading.Lock()
         self._channel = channel
         self._factory_changed = False
+        self._squelch = ChannelSquelch(
+            open_threshold_db=squelch_threshold_db,
+            hysteresis_db=squelch_hysteresis_db,
+            hang_s=squelch_hang_s,
+            enabled=squelch_enabled,
+        )
 
         self._plan: DemodChainPlan | None = None
         self._plan_key: tuple[float, float] | None = None
@@ -79,6 +96,10 @@ class DemodWorker:
     def plan(self) -> DemodChainPlan | None:
         """Current decimation plan, or ``None`` before the first block."""
         return self._plan
+
+    @property
+    def squelch(self) -> ChannelSquelch:
+        return self._squelch
 
     def audio_rate_hz(self, bandwidth_hz: float | None = None) -> float:
         """Audio rate this worker will produce, without running it.
@@ -104,6 +125,23 @@ class DemodWorker:
         with self._settings_lock:
             self._factory = factory
             self._factory_changed = True
+
+    def set_squelch(
+        self,
+        *,
+        enabled: bool | None = None,
+        threshold_db: float | None = None,
+        hysteresis_db: float | None = None,
+        hang_s: float | None = None,
+    ) -> None:
+        """Update squelch parameters; applied on the next IF block."""
+        with self._settings_lock:
+            self._squelch.configure(
+                enabled=enabled,
+                open_threshold_db=threshold_db,
+                hysteresis_db=hysteresis_db,
+                hang_s=hang_s,
+            )
 
     def start(self) -> None:
         if self.is_running:
@@ -136,6 +174,8 @@ class DemodWorker:
         self._plan_key = (sample_rate_hz, bandwidth_hz)
         self._demodulator = factory(self._plan.if_rate_hz, self._plan.audio_decimation)
         self._channelizer_state = None
+        with self._settings_lock:
+            self._squelch.reset()
         logger.info(
             "Demod chain: %s, IF %.1f Hz (dec %s), audio %.1f Hz (dec %s)",
             self._demodulator.mode,
@@ -176,7 +216,18 @@ class DemodWorker:
                     plan.channel,
                     state=self._channelizer_state,
                 )
+                power_db = channel_power_db(block.samples)
+                duration_s = (
+                    block.samples.size / block.sample_rate_hz
+                    if block.sample_rate_hz > 0.0
+                    else 0.0
+                )
+                with self._settings_lock:
+                    open_gate = self._squelch.update(power_db, duration_s)
+
                 audio = demodulator.process(block)
+                if not open_gate and audio.size:
+                    audio = np.zeros_like(audio)
             except Exception:
                 logger.exception("Demodulation failed; continuing")
                 self._channelizer_state = None

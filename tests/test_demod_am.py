@@ -181,7 +181,10 @@ def test_audio_amplitude_tracks_the_modulation_index(
             sample_rate_hz=SAMPLE_RATE_HZ,
         )
         device.connect()
-        demodulator = AMDemodulator(input_rate_hz=plan.output_rate_hz)
+        demodulator = AMDemodulator(
+            input_rate_hz=plan.output_rate_hz,
+            agc_enabled=False,
+        )
         audio = demodulate_stream(device, demodulator, channel, plan, num_blocks=4)
         amplitudes[modulation_index] = float(np.max(np.abs(audio[audio.size // 2 :])))
 

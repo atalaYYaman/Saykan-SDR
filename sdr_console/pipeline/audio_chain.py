@@ -52,10 +52,26 @@ class AudioChain:
         demodulator_factory: DemodulatorFactory = default_demodulator_factory,
         sink_factory: SinkFactory = default_sink_factory,
         audio_queue_maxsize: int = DEFAULT_AUDIO_QUEUE_MAXSIZE,
+        demod_mode: str = "AM",
+        deemphasis_tau_s: float = 75e-6,
+        nfm_deemphasis: bool = False,
+        afbw_hz: float | None = None,
+        agc_enabled: bool | None = None,
+        agc_preset: str | None = None,
+        squelch_enabled: bool = False,
+        squelch_threshold_db: float = -50.0,
+        squelch_hysteresis_db: float = 3.0,
+        squelch_hang_s: float = 0.15,
     ) -> None:
         self._device = device
         self._volume = float(np.clip(volume, 0.0, 1.0))
         self._sink_factory = sink_factory
+        self._demod_mode = str(demod_mode)
+        self._deemphasis_tau_s = float(deemphasis_tau_s)
+        self._nfm_deemphasis = bool(nfm_deemphasis)
+        self._afbw_hz = None if afbw_hz is None else float(afbw_hz)
+        self._agc_enabled = None if agc_enabled is None else bool(agc_enabled)
+        self._agc_preset = None if agc_preset is None else str(agc_preset)
         self._audio_queue: SampleQueue[np.ndarray] = SampleQueue(
             maxsize=audio_queue_maxsize
         )
@@ -67,6 +83,26 @@ class AudioChain:
             channel=channel,
             preferred_audio_rate_hz=preferred_audio_rate_hz,
             demodulator_factory=demodulator_factory,
+            squelch_enabled=squelch_enabled,
+            squelch_threshold_db=squelch_threshold_db,
+            squelch_hysteresis_db=squelch_hysteresis_db,
+            squelch_hang_s=squelch_hang_s,
+        )
+
+    def _factory_kwargs(self) -> dict:
+        return {
+            "deemphasis_tau_s": self._deemphasis_tau_s,
+            "nfm_deemphasis": self._nfm_deemphasis,
+            "afbw_hz": self._afbw_hz,
+            "agc_enabled": self._agc_enabled,
+            "agc_preset": self._agc_preset,
+        }
+
+    def _apply_factory(self) -> None:
+        from sdr_console.demod.factory import demodulator_factory
+
+        self._worker.set_demodulator_factory(
+            demodulator_factory(self._demod_mode, **self._factory_kwargs())
         )
 
     @property
@@ -109,9 +145,49 @@ class AudioChain:
 
     def set_demod_mode(self, mode: str) -> None:
         """Switch demodulation mode; applied at the next audio block."""
-        from sdr_console.demod.factory import demodulator_factory
+        self._demod_mode = str(mode)
+        self._apply_factory()
 
-        self._worker.set_demodulator_factory(demodulator_factory(mode))
+    def set_deemphasis(
+        self,
+        tau_s: float,
+        *,
+        nfm_deemphasis: bool | None = None,
+    ) -> None:
+        """Update FM de-emphasis; rebuilds the demodulator on the next block."""
+        self._deemphasis_tau_s = float(tau_s)
+        if nfm_deemphasis is not None:
+            self._nfm_deemphasis = bool(nfm_deemphasis)
+        self._apply_factory()
+
+    def set_afbw(self, afbw_hz: float) -> None:
+        """Update audio bandwidth; rebuilds the demodulator on the next block."""
+        self._afbw_hz = float(afbw_hz)
+        self._apply_factory()
+
+    def set_agc(self, *, enabled: bool | None = None, preset: str | None = None) -> None:
+        """Update AGC enable/preset; rebuilds the demodulator on the next block."""
+        if enabled is not None:
+            self._agc_enabled = bool(enabled)
+        if preset is not None:
+            self._agc_preset = str(preset)
+        self._apply_factory()
+
+    def set_squelch(
+        self,
+        *,
+        enabled: bool | None = None,
+        threshold_db: float | None = None,
+        hysteresis_db: float | None = None,
+        hang_s: float | None = None,
+    ) -> None:
+        """Update IF squelch; applied on the next audio block."""
+        self._worker.set_squelch(
+            enabled=enabled,
+            threshold_db=threshold_db,
+            hysteresis_db=hysteresis_db,
+            hang_s=hang_s,
+        )
 
     def start(self) -> None:
         """Open the sound card, then start demodulating.
