@@ -294,13 +294,23 @@ class PlutoSDRDevice(SDRDeviceInterface):
         assert self._sdr is not None
         sdr = self._sdr
         sdr.rx_enabled_channels = [0]
+        sdr.tx_enabled_channels = [0]
         sdr.rx_buffer_size = self._rx_buffer_size
         sdr.sample_rate = int(self._sample_rate_hz)
         sdr.rx_rf_bandwidth = int(self._sample_rate_hz)
+        sdr.tx_rf_bandwidth = int(self._sample_rate_hz)
         sdr.rx_lo = int(self._center_freq_hz)
+        sdr.tx_lo = int(self._center_freq_hz)
+        sdr.tx_hardwaregain_chan0 = -89.0
         sdr.gain_control_mode_chan0 = self._gain_mode
         if self._gain_mode == "manual":
             sdr.rx_hardwaregain_chan0 = self._gain_db
+        loopback = getattr(sdr, "loopback", None)
+        if loopback is not None:
+            try:
+                sdr.loopback = 0
+            except Exception:
+                logger.debug("Pluto loopback reset failed", exc_info=True)
 
     def _probe_capabilities(self, sdr: Any) -> DeviceCapabilities:
         """Read real hardware limits from libiio attributes when available."""

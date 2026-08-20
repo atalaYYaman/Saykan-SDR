@@ -2014,6 +2014,10 @@ class MainWindow(QMainWindow):
         suffix = ""
         if self._active_device_id == PLUTO_DEVICE_ID and not self._pipeline.is_running:
             suffix = " Waterfall için Start ile RX açın."
+        elif self._tx_panel.loopback_enabled():
+            suffix = " Çip içi loopback — RF değil."
+        else:
+            suffix = " RF yayın; RX antenle dinliyor."
         self._tx_panel.set_status_message(
             ("Yayın döngüsü başladı." if loop else "Yayın başladı.") + suffix
         )
@@ -2035,6 +2039,9 @@ class MainWindow(QMainWindow):
             device.set_tx_freq(self._tx_panel.tx_freq_hz())
             device.set_tx_attenuation_db(self._tx_panel.attenuation_db())
             device.set_tx_bandwidth_hz(bandwidth_hz)
+            set_loopback = getattr(device, "set_loopback_while_tx", None)
+            if callable(set_loopback):
+                set_loopback(self._tx_panel.loopback_enabled())
             device.transmit(iq, cyclic=True, max_duration_s=duration_s)
         except TXError as exc:
             self._stop_tx_transmission()
@@ -2063,6 +2070,7 @@ class MainWindow(QMainWindow):
                 bandwidth_hz=bandwidth_hz,
                 shared_sdr=shared if use_shared else None,
                 shared_lock=lock if use_shared else None,
+                loopback_while_tx=self._tx_panel.loopback_enabled(),
             )
             if not bool(getattr(device, "is_connected", False)):
                 connect = getattr(device, "connect", None)

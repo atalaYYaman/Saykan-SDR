@@ -24,7 +24,7 @@ def test_shared_tx_uses_rx_handle_and_does_not_destroy_it(
         sample_rate_hz=1_000_000.0,
         shared_sdr=rx.iio_backend,
         shared_lock=rx.iio_lock,
-        bandwidth_hz=100_000.0,
+        loopback_while_tx=True,
     )
     assert tx.is_connected
     assert not tx.owns_sdr
@@ -35,6 +35,9 @@ def test_shared_tx_uses_rx_handle_and_does_not_destroy_it(
     iq = np.ones(64, dtype=np.complex64)
     tx.transmit(iq, cyclic=True, max_duration_s=0.05)
     assert fake._tx_calls == 1
+    assert fake.loopback == 1
+    tx.stop_tx()
+    assert fake.loopback == 0
     tx.disconnect()
 
     assert rx._sdr is fake

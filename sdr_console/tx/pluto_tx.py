@@ -16,7 +16,10 @@ from sdr_console.hal.errors import DeviceConnectionError, DeviceUnavailableError
 from sdr_console.tx.constants import (
     DEFAULT_TX_ATTENUATION_DB,
     DEFAULT_TX_BANDWIDTH_HZ,
+    LOOPBACK_DIGITAL,
+    LOOPBACK_OFF,
     TX_FULL_SCALE,
+    TX_MUTE_ATTENUATION_DB,
 )
 from sdr_console.tx.interface import TXCapableDevice
 from sdr_console.tx.mock_tx import _resolve_max_duration, _validate_attenuation
@@ -39,6 +42,7 @@ class PlutoTXDevice(TXCapableDevice):
         bandwidth_hz: float = DEFAULT_TX_BANDWIDTH_HZ,
         shared_sdr: Any | None = None,
         shared_lock: threading.RLock | None = None,
+        loopback_while_tx: bool = False,
     ) -> None:
         if tx_buffer_size <= 0:
             raise ValueError("tx_buffer_size must be positive")
@@ -56,6 +60,7 @@ class PlutoTXDevice(TXCapableDevice):
         self._tx_buffer_size = int(tx_buffer_size)
         self._full_scale = float(full_scale)
         self._bandwidth_hz = float(bandwidth_hz)
+        self._loopback_while_tx = bool(loopback_while_tx)
 
         self._owns_sdr = shared_sdr is None
         self._sdr: Any | None = shared_sdr
@@ -206,10 +211,13 @@ class PlutoTXDevice(TXCapableDevice):
 
             self._cancel_timer()
             sdr = self._sdr
+            self._destroy_tx_buffer(sdr)
             sdr.tx_cyclic_buffer = bool(cyclic)
+            self._set_loopback(LOOPBACK_DIGITAL if self._loopback_while_tx else LOOPBACK_OFF)
             try:
                 sdr.tx(scaled)
             except Exception as exc:
+                self._set_loopback(LOOPBACK_OFF)
                 raise RuntimeError(f"Pluto TX failed: {exc}") from exc
 
             self._is_transmitting = True
@@ -221,13 +229,32 @@ class PlutoTXDevice(TXCapableDevice):
         with self._lock:
             self._cancel_timer()
             if self._sdr is not None:
-                destroy = getattr(self._sdr, "tx_destroy_buffer", None)
-                if callable(destroy):
-                    try:
-                        destroy()
-                    except Exception:
-                        logger.debug("tx_destroy_buffer failed", exc_info=True)
+                self._set_loopback(LOOPBACK_OFF)
+                self._destroy_tx_buffer(self._sdr)
+                try:
+                    self._sdr.tx_hardwaregain_chan0 = -TX_MUTE_ATTENUATION_DB
+                except Exception:
+                    logger.debug("TX mute failed", exc_info=True)
             self._is_transmitting = False
+
+    def set_loopback_while_tx(self, enabled: bool) -> None:
+        self._loopback_while_tx = bool(enabled)
+
+    def _set_loopback(self, mode: int) -> None:
+        if self._sdr is None or not hasattr(self._sdr, "loopback"):
+            return
+        try:
+            self._sdr.loopback = int(mode)
+        except Exception:
+            logger.debug("Pluto loopback=%s failed", mode, exc_info=True)
+
+    def _destroy_tx_buffer(self, sdr: Any) -> None:
+        destroy = getattr(sdr, "tx_destroy_buffer", None)
+        if callable(destroy):
+            try:
+                destroy()
+            except Exception:
+                logger.debug("tx_destroy_buffer failed", exc_info=True)
 
     def _auto_stop(self) -> None:
         self.stop_tx()
@@ -250,7 +277,9 @@ class PlutoTXDevice(TXCapableDevice):
     def _apply_tx_settings(self) -> None:
         assert self._sdr is not None
         sdr = self._sdr
-        sdr.tx_enabled_channels = [0]
+        # RX akışı başladıktan sonra kanalları yeniden seçmek IIO tamponunu bozar.
+        if getattr(sdr, "tx_enabled_channels", None) != [0]:
+            sdr.tx_enabled_channels = [0]
         sdr.tx_buffer_size = self._tx_buffer_size
         if self._owns_sdr:
             sdr.sample_rate = int(self._sample_rate_hz)

@@ -17,10 +17,10 @@ def _tone_iq(num_samples: int = 4096) -> np.ndarray:
     return np.exp(1j * phase).astype(np.complex64)
 
 
-def test_default_attenuation_is_minus_50_db() -> None:
+def test_default_attenuation_is_minus_40_db() -> None:
     device = MockTXDevice()
     assert device.attenuation_db == DEFAULT_TX_ATTENUATION_DB
-    assert DEFAULT_TX_ATTENUATION_DB == 50.0
+    assert DEFAULT_TX_ATTENUATION_DB == 40.0
 
 
 def test_attenuation_limit_rejects_too_strong_tx() -> None:

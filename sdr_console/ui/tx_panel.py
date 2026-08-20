@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QDoubleSpinBox,
     QFormLayout,
     QGridLayout,
@@ -111,13 +112,23 @@ class TxPanel(QGroupBox):
         form.addRow("Süre", self._duration_spin)
         form.addRow("Aralık", self._interval_spin)
 
+        self._loopback_check = QCheckBox("Çip içi loopback (RF değil)")
+        self._loopback_check.setChecked(False)
+        self._loopback_check.setToolTip(
+            "Açıkken AD9363 TX IQ'sunu antene gitmeden RX yoluna kopyalar. "
+            "Dışarıya yayın testi değildir. Gerçek RF için kapalı tutun; "
+            "RX açık kalır, TX SMA'dan yayın yapılır."
+        )
+        form.addRow("", self._loopback_check)
+
         self._backend_label = QLabel("Simülasyon: Mock TX (gerçek RF yok)")
         self._backend_label.setWordWrap(True)
 
         self._safety_label = QLabel(
-            "RF yayın yasal sorumluluğu kullanıcıya aittir. "
-            f"Varsayılan güç düşüktür (−{DEFAULT_TX_ATTENUATION_DB:.0f} dB). "
-            f"Parça süresi en fazla {DEFAULT_MAX_TX_DURATION_S:.0f} s."
+            "TX anteninden yayın, RX anteninden normal dinleme (kablo/loopback yok). "
+            "İki porta da anten takın; çip içi loopback kapalı kalsın. "
+            f"Attenuation en az {MIN_TX_ATTENUATION_DB:.0f} dB. "
+            "Yayın sürerken waterfall'da merkeze bakın; aralıkta TX kapalıdır."
         )
         self._safety_label.setWordWrap(True)
 
@@ -172,6 +183,9 @@ class TxPanel(QGroupBox):
     def interval_s(self) -> float:
         return float(self._interval_spin.value())
 
+    def loopback_enabled(self) -> bool:
+        return self._loopback_check.isChecked()
+
     def set_backend_label(self, text: str) -> None:
         self._backend_label.setText(text)
 
@@ -202,3 +216,4 @@ class TxPanel(QGroupBox):
         self._attenuation_spin.setEnabled(idle)
         self._duration_spin.setEnabled(idle)
         self._interval_spin.setEnabled(idle)
+        self._loopback_check.setEnabled(idle)

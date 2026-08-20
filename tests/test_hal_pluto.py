@@ -65,6 +65,7 @@ class FakePluto:
         self.tx_lo = 100_000_000
         self.tx_hardwaregain_chan0 = -50.0
         self.tx_cyclic_buffer = False
+        self.loopback = 0
         self._rx_calls = 0
         self._tx_calls = 0
         self._ctx = _FakeContext(
@@ -169,6 +170,11 @@ def test_pluto_scales_and_serves_exact_length(monkeypatch: pytest.MonkeyPatch) -
     assert device.capabilities.min_sample_rate_hz == pytest.approx(520_833.0)
     assert device.capabilities.max_gain_db == 71.0
 
+    fake = device._sdr
+    assert fake is not None
+    assert fake.tx_enabled_channels == [0]
+    assert fake.tx_lo == 100_000_000
+
     samples = device.read_samples(1024)
     assert samples.shape == (1024,)
     assert samples.dtype == np.complex64
@@ -177,8 +183,6 @@ def test_pluto_scales_and_serves_exact_length(monkeypatch: pytest.MonkeyPatch) -
 
     # Residual should serve another block without requiring a new rx() yet
     # until residual is exhausted (4096 - 1024 = 3072 left).
-    fake = device._sdr
-    assert fake is not None
     calls_before = fake._rx_calls
     more = device.read_samples(2048)
     assert more.shape == (2048,)

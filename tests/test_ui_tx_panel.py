@@ -50,6 +50,7 @@ def test_tx_panel_defaults(panel: TxPanel) -> None:
     assert not panel._stop_button.isEnabled()
     assert panel._oneshot_button.isEnabled()
     assert panel._loop_button.isEnabled()
+    assert not panel.loopback_enabled()
 
 
 def test_tx_panel_emits_oneshot_and_loop_signals(panel: TxPanel, qtbot) -> None:
