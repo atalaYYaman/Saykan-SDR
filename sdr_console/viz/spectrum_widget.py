@@ -5,11 +5,31 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtWidgets import QSizePolicy
 
 from sdr_console.dsp.axis import band_edges_hz, frequency_axis_hz
 from sdr_console.dsp.frame import SpectrumFrame
 from sdr_console.viz.interaction import frequency_at_scene_pos
 from sdr_console.viz.settings import DisplaySettings
+
+
+def _prepare_fill_plot(plot: pg.PlotWidget) -> None:
+    """Stretch the ViewBox to the widget so the curve is not letterboxed."""
+    plot.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    plot.setMinimumWidth(0)
+    if hasattr(plot, "setAspectLocked"):
+        plot.setAspectLocked(False)
+    plot_item = plot.getPlotItem()
+    plot_item.setContentsMargins(0, 0, 0, 0)
+    plot_item.hideButtons()
+    layout = plot_item.layout
+    if layout is not None:
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+    view_box = plot_item.getViewBox()
+    view_box.setAspectLocked(False)
+    view_box.setDefaultPadding(0.0)
+    view_box.enableAutoRange(x=False, y=False)
 
 
 class SpectrumWidget(pg.PlotWidget):
@@ -37,6 +57,7 @@ class SpectrumWidget(pg.PlotWidget):
         self._sample_rate_hz = float(sample_rate_hz)
         self._x = frequency_axis_hz(self._center_freq_hz, self._sample_rate_hz, fft_size)
 
+        _prepare_fill_plot(self)
         plot_item = self.getPlotItem()
         plot_item.setLabel("left", "Power (dBFS)")
         plot_item.getAxis("left").setWidth(self._settings.axis_label_width)

@@ -19,6 +19,10 @@ class TXCapableDevice(ABC):
         """TX attenuation'ı dB cinsinden ayarla (yüksek = daha zayıf yayın)."""
 
     @abstractmethod
+    def set_tx_bandwidth_hz(self, bandwidth_hz: float) -> None:
+        """TX analog / işgal bant genişliğini Hz cinsinden ayarla."""
+
+    @abstractmethod
     def transmit(
         self,
         iq: np.ndarray,

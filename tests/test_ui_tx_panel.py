@@ -1,4 +1,4 @@
-"""TX / Replay paneli ve MainWindow bağlantı testleri."""
+"""TX test-sinyali paneli ve MainWindow bağlantı testleri."""
 
 from __future__ import annotations
 
@@ -9,16 +9,17 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QMessageBox
 
 from sdr_console.config.app_config import AppConfig
-from sdr_console.tx.capture_decoder import analyze_capture
-from sdr_console.tx.constants import DEFAULT_TX_ATTENUATION_DB, MIN_TX_ATTENUATION_DB
-from sdr_console.tx.ook_encoder import encode_ook
+from sdr_console.tx.constants import (
+    DEFAULT_BURST_DURATION_S,
+    DEFAULT_MAX_TX_DURATION_S,
+    DEFAULT_TX_ATTENUATION_DB,
+    DEFAULT_TX_INTERVAL_S,
+    MIN_TX_ATTENUATION_DB,
+)
 from sdr_console.ui.main_window import MainWindow
 from sdr_console.ui.tx_panel import DEFAULT_TX_FREQ_MHZ, TxPanel
 
 pytest.importorskip("pytestqt")
-
-SAMPLE_RATE_HZ = 2_000_000.0
-BIT_DURATION_S = 0.0003
 
 
 @pytest.fixture
@@ -43,87 +44,95 @@ def test_tx_panel_defaults(panel: TxPanel) -> None:
     assert panel.tx_freq_hz() == pytest.approx(DEFAULT_TX_FREQ_MHZ * 1_000_000.0)
     assert panel.attenuation_db() == pytest.approx(DEFAULT_TX_ATTENUATION_DB)
     assert panel.attenuation_db() >= MIN_TX_ATTENUATION_DB
-    assert not panel.has_capture()
-    assert not panel._replay_button.isEnabled()
+    assert panel.duration_s() == pytest.approx(DEFAULT_BURST_DURATION_S)
+    assert panel.interval_s() == pytest.approx(DEFAULT_TX_INTERVAL_S)
+    assert panel._duration_spin.maximum() == pytest.approx(DEFAULT_MAX_TX_DURATION_S)
     assert not panel._stop_button.isEnabled()
-    assert panel._capture_button.isEnabled()
+    assert panel._oneshot_button.isEnabled()
+    assert panel._loop_button.isEnabled()
 
 
-def test_tx_panel_emits_capture_and_replay_signals(panel: TxPanel, qtbot) -> None:
-    with qtbot.waitSignal(panel.capture_requested, timeout=1000):
-        qtbot.mouseClick(panel._capture_button, Qt.MouseButton.LeftButton)
-
-    panel.set_has_capture(True)
-    with qtbot.waitSignal(panel.replay_requested, timeout=1000):
-        qtbot.mouseClick(panel._replay_button, Qt.MouseButton.LeftButton)
+def test_tx_panel_emits_oneshot_and_loop_signals(panel: TxPanel, qtbot) -> None:
+    with qtbot.waitSignal(panel.oneshot_requested, timeout=1000):
+        qtbot.mouseClick(panel._oneshot_button, Qt.MouseButton.LeftButton)
+    with qtbot.waitSignal(panel.loop_requested, timeout=1000):
+        qtbot.mouseClick(panel._loop_button, Qt.MouseButton.LeftButton)
 
 
-def test_replay_disabled_until_capture_and_while_busy(panel: TxPanel) -> None:
-    assert not panel._replay_button.isEnabled()
-    panel.set_has_capture(True)
-    assert panel._replay_button.isEnabled()
-
-    panel.set_busy(True)
-    assert not panel._replay_button.isEnabled()
-    assert not panel._capture_button.isEnabled()
-
-    panel.set_busy(False)
+def test_buttons_lock_while_transmitting(panel: TxPanel) -> None:
     panel.set_transmitting(True)
-    assert not panel._replay_button.isEnabled()
+    assert not panel._oneshot_button.isEnabled()
+    assert not panel._loop_button.isEnabled()
     assert panel._stop_button.isEnabled()
 
 
-def test_capture_without_stream_shows_status(window: MainWindow) -> None:
-    window._tx_panel.capture_requested.emit()
-    assert "Start" in window._tx_panel._status_label.text()
-    assert not window._tx_panel.has_capture()
-
-
-def test_live_capture_from_mock_stream_enables_replay(
-    window: MainWindow,
-    qtbot,
-) -> None:
-    window._tx_panel._capture_duration_spin.setValue(0.05)
-    qtbot.mouseClick(window._start_button, Qt.MouseButton.LeftButton)
-    qtbot.waitUntil(lambda: window._pipeline.is_running, timeout=5000)
-
-    window._tx_panel.capture_requested.emit()
-    qtbot.waitUntil(lambda: window._tx_panel.has_capture(), timeout=5000)
-    assert window._tx_panel._replay_button.isEnabled()
-    assert window._tx_session.latest is not None
-
-
-def test_replay_cancel_does_not_transmit(window: MainWindow, monkeypatch) -> None:
-    iq = encode_ook([1, 0, 1], BIT_DURATION_S, SAMPLE_RATE_HZ, 0.85)
-    window._tx_session.add_capture(analyze_capture(iq, SAMPLE_RATE_HZ, threshold=0.4))
-    window._refresh_tx_panel_from_session()
-
+def test_oneshot_cancel_does_not_transmit(window: MainWindow, monkeypatch) -> None:
     monkeypatch.setattr(
         QMessageBox,
         "question",
         lambda *args, **kwargs: QMessageBox.StandardButton.No,
     )
-    window._tx_panel.replay_requested.emit()
+    window._tx_panel.oneshot_requested.emit()
 
     assert window._tx_device is None
     assert "iptal" in window._tx_panel._status_label.text().lower()
 
 
-def test_replay_confirm_uses_mock_tx(window: MainWindow, monkeypatch) -> None:
-    iq = encode_ook([1, 0, 1, 1], BIT_DURATION_S, SAMPLE_RATE_HZ, 0.85)
-    window._tx_session.add_capture(analyze_capture(iq, SAMPLE_RATE_HZ, threshold=0.4))
-    window._refresh_tx_panel_from_session()
-    window._tx_panel._max_duration_spin.setValue(0.20)
+def test_oneshot_confirm_uses_mock_tx_and_snaps_rx(
+    window: MainWindow,
+    monkeypatch,
+) -> None:
+    window._tx_panel._duration_spin.setValue(0.20)
+    window._tx_panel._freq_spin.setValue(433.97)
 
     monkeypatch.setattr(
         QMessageBox,
         "question",
         lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
     )
-    window._tx_panel.replay_requested.emit()
+    window._tx_panel.oneshot_requested.emit()
 
     assert window._tx_device is not None
     assert window._tx_device.transmitted_iq is not None
     assert window._tx_device.transmitted_iq.size > 0
     assert window._tx_panel.is_transmitting()
     assert window._tx_device.attenuation_db == pytest.approx(DEFAULT_TX_ATTENUATION_DB)
+    assert window._center_freq_spin.value() == pytest.approx(433_970_000.0)
+    assert window._device.center_freq_hz == pytest.approx(433_970_000.0)
+
+
+def test_loop_transmits_again_after_interval(
+    window: MainWindow,
+    qtbot,
+    monkeypatch,
+) -> None:
+    window._tx_panel._duration_spin.setValue(0.12)
+    window._tx_panel._interval_spin.setValue(0.12)
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+    window._tx_panel.loop_requested.emit()
+    qtbot.waitUntil(lambda: window._tx_device is not None, timeout=2000)
+    qtbot.waitUntil(
+        lambda: window._tx_device is not None
+        and len(getattr(window._tx_device, "history", [])) >= 2,
+        timeout=5000,
+    )
+    assert window._tx_loop_active
+    window._on_tx_stop_requested()
+    assert not window._tx_loop_active
+    assert window._tx_device is None
+
+
+def test_duplex_hint_only_for_pluto(window: MainWindow) -> None:
+    assert window._sample_rate_label.text() == "Sample rate"
+    window._active_device_id = "pluto"
+    window._sync_duplex_sample_rate_hint()
+    text = window._sample_rate_label.text()
+    assert text.startswith("Sample rate (")
+    assert "eşzamanlı RX+TX" in text
+    assert "2.048" in text
+    assert "1.024" in text

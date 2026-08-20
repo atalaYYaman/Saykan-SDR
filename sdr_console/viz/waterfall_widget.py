@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import QRectF, Qt, pyqtSignal
+from PyQt6.QtWidgets import QSizePolicy
 
 from sdr_console.dsp.axis import band_edges_hz
 from sdr_console.dsp.frame import SpectrumFrame
@@ -12,6 +13,25 @@ from sdr_console.viz.buffer import append_spectrum_row
 from sdr_console.viz.colormap import apply_colormap, apply_db_levels
 from sdr_console.viz.interaction import frequency_at_scene_pos
 from sdr_console.viz.settings import DisplaySettings
+
+
+def _prepare_fill_plot(plot: pg.PlotWidget) -> None:
+    """Stretch the ViewBox to the widget so the image is not letterboxed."""
+    plot.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+    plot.setMinimumSize(0, 0)
+    if hasattr(plot, "setAspectLocked"):
+        plot.setAspectLocked(False)
+    plot_item = plot.getPlotItem()
+    plot_item.setContentsMargins(0, 0, 0, 0)
+    plot_item.hideButtons()
+    layout = plot_item.layout
+    if layout is not None:
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+    view_box = plot_item.getViewBox()
+    view_box.setAspectLocked(False)
+    view_box.setDefaultPadding(0.0)
+    view_box.enableAutoRange(x=False, y=False)
 
 
 class WaterfallWidget(pg.PlotWidget):
@@ -44,6 +64,7 @@ class WaterfallWidget(pg.PlotWidget):
             dtype=np.float32,
         )
 
+        _prepare_fill_plot(self)
         plot_item = self.getPlotItem()
         plot_item.setLabel("bottom", "Frequency", units="Hz")
         plot_item.setLabel("left", "Time")
@@ -56,6 +77,8 @@ class WaterfallWidget(pg.PlotWidget):
 
         self._image = pg.ImageItem(self._history, axisOrder="row-major")
         plot_item.addItem(self._image)
+        view_box = plot_item.getViewBox()
+        view_box.setAspectLocked(False)
         self._apply_settings(self._settings)
         self._rect = QRectF()
         self._update_geometry()
@@ -118,6 +141,7 @@ class WaterfallWidget(pg.PlotWidget):
         """Push the current history buffer to the ImageItem once."""
         self._image.setImage(self._history, autoLevels=False)
         self._image.setRect(self._rect)
+        self.getPlotItem().getViewBox().setAspectLocked(False)
 
     def _update_geometry(self) -> None:
         low_hz, high_hz = band_edges_hz(self._center_freq_hz, self._sample_rate_hz)
@@ -128,6 +152,7 @@ class WaterfallWidget(pg.PlotWidget):
             float(self._history_rows),
         )
         self._image.setRect(self._rect)
+        self.getPlotItem().getViewBox().setAspectLocked(False)
         self.reset_view()
 
     def _apply_settings(self, settings: DisplaySettings) -> None:

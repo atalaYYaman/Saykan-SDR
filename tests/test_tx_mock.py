@@ -56,3 +56,9 @@ def test_none_max_duration_uses_default_and_stops() -> None:
 def test_constructor_rejects_attenuation_below_limit() -> None:
     with pytest.raises(TXAttenuationLimitError):
         MockTXDevice(attenuation_db=20.0)
+
+
+def test_set_tx_bandwidth_is_stored() -> None:
+    device = MockTXDevice()
+    device.set_tx_bandwidth_hz(25_000.0)
+    assert device.bandwidth_hz == pytest.approx(25_000.0)

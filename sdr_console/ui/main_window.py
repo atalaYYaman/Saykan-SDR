@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
-import time
 from collections.abc import Callable
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal, QByteArray
+from PyQt6.QtCore import QByteArray, QObject, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QCloseEvent, QFont
 from PyQt6.QtWidgets import (
+    QAbstractScrollArea,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -31,7 +31,7 @@ from PyQt6.QtWidgets import (
 
 from sdr_console.audio.errors import AudioError
 from sdr_console.audio.sink import sounddevice_available
-from sdr_console.config.app_config import AppConfig, WINDOW_LAYOUT_VERSION
+from sdr_console.config.app_config import WINDOW_LAYOUT_VERSION, AppConfig
 from sdr_console.config.storage import save_config
 from sdr_console.demod.factory import (
     DEMOD_MODES,
@@ -78,21 +78,21 @@ from sdr_console.scan.controller import (
     ScanResult,
     compute_scan_centers,
 )
-from sdr_console.ui.collapsible import CollapsibleGroupBox
-from sdr_console.ui.connect_worker import ConnectWorker
-from sdr_console.ui.feature_host import FeaturePanelHost
-from sdr_console.ui.hover_drawer import HoverDrawer
-from sdr_console.ui.panel_toolbar import PanelToolBar
-from sdr_console.ui.detection_panel import DEFAULT_DETECTION_THRESHOLD_DB, DetectionPanel
-from sdr_console.ui.devices import clamp_config_to_capabilities, device_create_kwargs
-from sdr_console.ui.scan_panel import ScanPanel
-from sdr_console.ui.tx_panel import TxPanel
+from sdr_console.tx.constants import DEFAULT_MAX_TX_DURATION_S, pluto_duplex_spectrum_hint
 from sdr_console.tx.errors import TXError
 from sdr_console.tx.interface import TXCapableDevice
 from sdr_console.tx.mock_tx import MockTXDevice
 from sdr_console.tx.pluto_tx import PlutoTXDevice
-from sdr_console.tx.replay import replay_capture
-from sdr_console.tx.session import ReplaySession, format_capture_summary
+from sdr_console.tx.waveform import generate_noise_plus_tone
+from sdr_console.ui.collapsible import CollapsibleGroupBox
+from sdr_console.ui.connect_worker import ConnectWorker
+from sdr_console.ui.detection_panel import DEFAULT_DETECTION_THRESHOLD_DB, DetectionPanel
+from sdr_console.ui.devices import clamp_config_to_capabilities, device_create_kwargs
+from sdr_console.ui.feature_host import FeaturePanelHost
+from sdr_console.ui.hover_drawer import HoverDrawer
+from sdr_console.ui.panel_toolbar import PanelToolBar
+from sdr_console.ui.scan_panel import ScanPanel
+from sdr_console.ui.tx_panel import TxPanel
 from sdr_console.viz.sdr_display import SdrDisplayWidget
 from sdr_console.viz.settings import DisplaySettings
 
@@ -154,6 +154,29 @@ def _titled_label(text: str, tooltip: str) -> QLabel:
     label = QLabel(text)
     label.setToolTip(tooltip)
     return label
+
+
+def _control_form() -> QFormLayout:
+    """Vertical label/field form that grows with the sidebar instead of clipping."""
+    form = QFormLayout()
+    form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+    form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+    form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+    form.setHorizontalSpacing(8)
+    form.setVerticalSpacing(6)
+    form.setContentsMargins(2, 2, 2, 2)
+    return form
+
+
+def _inline_widgets(*widgets: QWidget, stretch: int = 0) -> QWidget:
+    """Pack several controls on one form row without overflowing the frame."""
+    row = QWidget()
+    layout = QHBoxLayout(row)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(6)
+    for index, widget in enumerate(widgets):
+        layout.addWidget(widget, 1 if index == stretch else 0)
+    return row
 
 
 class _ScanBridge(QObject):
@@ -224,10 +247,8 @@ class MainWindow(QMainWindow):
         )
         self._scan_panel = ScanPanel(sample_rate_hz=self._config.sample_rate_hz)
         self._tx_panel = TxPanel()
-        self._tx_session = ReplaySession()
         self._tx_device: TXCapableDevice | None = None
-        self._tx_capture_queue = None
-        self._tx_capture_deadline = 0.0
+        self._tx_loop_active = False
         self._pipeline = self._build_pipeline()
         self._channel = self._channel_from_config()
         self._display = self._create_display()
@@ -242,13 +263,14 @@ class MainWindow(QMainWindow):
         self._refresh_timer.setInterval(self._config.display_refresh_ms)
         self._refresh_timer.timeout.connect(self._poll_pipeline_output)
 
-        self._tx_capture_timer = QTimer(self)
-        self._tx_capture_timer.setInterval(25)
-        self._tx_capture_timer.timeout.connect(self._poll_tx_capture)
         self._tx_idle_timer = QTimer(self)
         self._tx_idle_timer.setInterval(100)
         self._tx_idle_timer.timeout.connect(self._poll_tx_idle)
+        self._tx_gap_timer = QTimer(self)
+        self._tx_gap_timer.setSingleShot(True)
+        self._tx_gap_timer.timeout.connect(self._on_tx_gap_elapsed)
         self._sync_tx_backend_label()
+        self._sync_duplex_sample_rate_hint()
 
         if self._status_warning:
             self._status_label.setText(self._status_warning)
@@ -380,7 +402,8 @@ class MainWindow(QMainWindow):
         root.addLayout(transport_row)
 
         self._receiver_box = CollapsibleGroupBox("Receiver")
-        tuning_form = QFormLayout(self._receiver_box.content_widget())
+        tuning_form = _control_form()
+        self._receiver_box.content_widget().setLayout(tuning_form)
         caps = self._device.capabilities
 
         self._center_freq_spin = QDoubleSpinBox()
@@ -391,6 +414,7 @@ class MainWindow(QMainWindow):
 
         self._freq_step_combo = QComboBox()
         self._freq_step_combo.setToolTip("Arrow keys / mouse wheel step for frequency spin boxes")
+        self._freq_step_combo.setMaximumWidth(110)
         for step_hz in FREQ_STEP_CHOICES_HZ:
             label = format_frequency(step_hz).replace(" ", "")
             self._freq_step_combo.addItem(label, step_hz)
@@ -408,11 +432,6 @@ class MainWindow(QMainWindow):
         self._listen_freq_spin.setToolTip(_TOOLTIP_VFO)
         self._update_listen_freq_range()
 
-        listen_row = QWidget()
-        listen_layout = QHBoxLayout(listen_row)
-        listen_layout.setContentsMargins(0, 0, 0, 0)
-        listen_layout.addWidget(self._listen_freq_spin, stretch=1)
-
         self._gain_spin = QDoubleSpinBox()
         self._gain_spin.setSuffix(" dB")
         self._gain_spin.setDecimals(1)
@@ -421,6 +440,7 @@ class MainWindow(QMainWindow):
 
         self._gain_step_combo = QComboBox()
         self._gain_step_combo.setToolTip("Arrow keys / mouse wheel step for the gain spin box")
+        self._gain_step_combo.setMaximumWidth(90)
         for step_db in GAIN_STEP_CHOICES_DB:
             self._gain_step_combo.addItem(f"{step_db:g} dB", step_db)
 
@@ -437,6 +457,8 @@ class MainWindow(QMainWindow):
 
         self._sample_rate_combo = QComboBox()
         self._configure_sample_rate_combo(caps)
+        self._sample_rate_label = QLabel("Sample rate")
+        self._sample_rate_label.setWordWrap(True)
 
         self._fft_size_combo = QComboBox()
         for size in FFT_SIZE_CHOICES:
@@ -453,24 +475,24 @@ class MainWindow(QMainWindow):
             line_edit.setPlaceholderText("kHz")
 
         self._vfo_label = QLabel()
+        self._vfo_label.setWordWrap(True)
         self._vfo_label.setToolTip(
             f"{_TOOLTIP_VFO} Spektrum veya waterfall'a tıklayarak / kutuyu sürükleyerek "
             "dinleme frekansını taşıyabilirsiniz."
         )
 
         tuning_form.addRow("Center frequency", center_row)
-        tuning_form.addRow(_titled_label("Listen (VFO)", _TOOLTIP_VFO), listen_row)
+        tuning_form.addRow(_titled_label("Listen (VFO)", _TOOLTIP_VFO), self._listen_freq_spin)
         tuning_form.addRow("Gain", gain_row)
         tuning_form.addRow("Gain mode", self._gain_mode_combo)
-        tuning_form.addRow("Sample rate", self._sample_rate_combo)
+        tuning_form.addRow(self._sample_rate_label, self._sample_rate_combo)
         tuning_form.addRow("FFT size", self._fft_size_combo)
         tuning_form.addRow(_titled_label("RFBW", _TOOLTIP_RFBW), self._bandwidth_combo)
         tuning_form.addRow("Channel", self._vfo_label)
 
         self._audio_box = CollapsibleGroupBox("Audio")
-        audio_layout = QVBoxLayout(self._audio_box.content_widget())
-
-        audio_top = QHBoxLayout()
+        audio_form = _control_form()
+        self._audio_box.content_widget().setLayout(audio_form)
         self._audio_check = QCheckBox("Enable")
         available, detail = sounddevice_available()
         self._audio_check.setEnabled(available)
@@ -523,38 +545,38 @@ class MainWindow(QMainWindow):
         self._squelch_spin.setSingleStep(1.0)
         self._squelch_spin.setToolTip(_TOOLTIP_SQL)
 
-        audio_top.addWidget(self._audio_check)
-        audio_top.addWidget(QLabel("Mode"))
-        audio_top.addWidget(self._demod_combo)
-        audio_top.addWidget(QLabel("De-emp"))
-        audio_top.addWidget(self._deemphasis_combo)
-        audio_top.addWidget(self._nfm_deemphasis_check)
-        audio_top.addWidget(_titled_label("AFBW", _TOOLTIP_AFBW))
-        audio_top.addWidget(self._afbw_combo)
-        audio_top.addWidget(self._agc_check)
-        audio_top.addWidget(self._agc_combo)
-        audio_top.addWidget(self._squelch_check)
-        audio_top.addWidget(self._squelch_spin)
-        audio_top.addStretch()
-        audio_layout.addLayout(audio_top)
-
-        volume_row = QHBoxLayout()
         self._volume_slider = QSlider(Qt.Orientation.Horizontal)
         self._volume_slider.setRange(0, 100)
-        self._volume_slider.setMaximumWidth(220)
         self._volume_spin = QSpinBox()
         self._volume_spin.setRange(0, 100)
         self._volume_spin.setSuffix(" %")
-        self._volume_spin.setMaximumWidth(72)
+        self._volume_spin.setMaximumWidth(80)
+        self._volume_spin.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Fixed,
+        )
 
-        volume_row.addWidget(QLabel("Volume"))
-        volume_row.addWidget(self._volume_slider)
-        volume_row.addWidget(self._volume_spin)
-        volume_row.addStretch()
-        audio_layout.addLayout(volume_row)
+        audio_form.addRow(self._audio_check)
+        audio_form.addRow("Mode", self._demod_combo)
+        audio_form.addRow("De-emp", self._deemphasis_combo)
+        audio_form.addRow(self._nfm_deemphasis_check)
+        audio_form.addRow(_titled_label("AFBW", _TOOLTIP_AFBW), self._afbw_combo)
+        audio_form.addRow(
+            "AGC",
+            _inline_widgets(self._agc_check, self._agc_combo, stretch=1),
+        )
+        audio_form.addRow(
+            "SQL",
+            _inline_widgets(self._squelch_check, self._squelch_spin, stretch=1),
+        )
+        audio_form.addRow(
+            "Volume",
+            _inline_widgets(self._volume_slider, self._volume_spin, stretch=0),
+        )
 
         self._display_box = CollapsibleGroupBox("Display")
-        display_form = QFormLayout(self._display_box.content_widget())
+        display_form = _control_form()
+        self._display_box.content_widget().setLayout(display_form)
         self._vmin_spin = QDoubleSpinBox()
         self._vmin_spin.setSuffix(" dB")
         self._vmin_spin.setDecimals(1)
@@ -566,30 +588,52 @@ class MainWindow(QMainWindow):
         display_form.addRow("dB min (vmin)", self._vmin_spin)
         display_form.addRow("dB max (vmax)", self._vmax_spin)
 
+        self._receiver_box.setMinimumWidth(260)
+        self._audio_box.setMinimumWidth(240)
+        self._display_box.setMinimumWidth(180)
+
         self._controls_column = QWidget()
         self._controls_column.setObjectName("controls_column")
-        controls_layout = QVBoxLayout(self._controls_column)
-        controls_layout.setContentsMargins(8, 8, 8, 8)
+        controls_layout = QHBoxLayout(self._controls_column)
+        controls_layout.setContentsMargins(6, 4, 6, 4)
         controls_layout.setSpacing(8)
-        controls_layout.addWidget(self._receiver_box)
-        controls_layout.addWidget(self._audio_box)
-        controls_layout.addWidget(self._display_box)
-        controls_layout.addStretch()
+        controls_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        controls_layout.addWidget(
+            self._receiver_box, stretch=3, alignment=Qt.AlignmentFlag.AlignTop
+        )
+        controls_layout.addWidget(
+            self._audio_box, stretch=3, alignment=Qt.AlignmentFlag.AlignTop
+        )
+        controls_layout.addWidget(
+            self._display_box, stretch=2, alignment=Qt.AlignmentFlag.AlignTop
+        )
 
         self._controls_scroll = QScrollArea()
         self._controls_scroll.setObjectName("controls_scroll")
         self._controls_scroll.setWidgetResizable(True)
         self._controls_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._controls_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self._controls_scroll.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
-        self._controls_scroll.setWidget(self._controls_column)
-        self._controls_scroll.setMinimumWidth(300)
-        self._controls_scroll.setMaximumWidth(380)
-        self._controls_scroll.setSizePolicy(
-            QSizePolicy.Policy.Fixed,
-            QSizePolicy.Policy.Expanding,
+        self._controls_scroll.setSizeAdjustPolicy(
+            QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents
         )
+        self._controls_scroll.setWidget(self._controls_column)
+        self._controls_scroll.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Maximum,
+        )
+
+        self._main_column = QWidget()
+        self._main_column.setObjectName("main_column")
+        self._main_layout = QVBoxLayout(self._main_column)
+        self._main_layout.setContentsMargins(0, 0, 0, 0)
+        self._main_layout.setSpacing(4)
+        self._main_layout.addWidget(self._controls_scroll, stretch=0)
+        self._main_layout.addWidget(self._display, stretch=1)
 
         self._hover_drawer = HoverDrawer()
         self._feature_host = FeaturePanelHost(
@@ -605,15 +649,15 @@ class MainWindow(QMainWindow):
             self._tx_panel,
         ]
 
-        body = QHBoxLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(0)
-        body.addWidget(self._hover_drawer)
-        body.addWidget(self._controls_scroll)
-        body.addWidget(self._display, stretch=1)
-        body.addWidget(self._feature_host)
-        root.addLayout(body, stretch=1)
+        self._content_row = QHBoxLayout()
+        self._content_row.setContentsMargins(0, 0, 0, 0)
+        self._content_row.setSpacing(0)
+        self._content_row.addWidget(self._hover_drawer)
+        self._content_row.addWidget(self._main_column, stretch=1)
+        self._content_row.addWidget(self._feature_host)
+        root.addLayout(self._content_row, stretch=1)
         self._setup_feature_panels()
+        self._feature_host.visibility_changed.connect(self._on_feature_panels_changed)
 
         self._status_label = QLabel("Idle")
         status_font = QFont(self._status_label.font())
@@ -666,10 +710,28 @@ class MainWindow(QMainWindow):
             logger.warning("Failed to restore window_state; using default dock layout")
 
     def _on_control_panel_toggled(self, _expanded: bool = True) -> None:
-        """Daraltılan Receiver/Audio/Display sütun boyutunu güncellesin."""
+        """Üstteki Receiver/Audio/Display satırı daralınca waterfall alanı büyüsün."""
         for box in (self._receiver_box, self._audio_box, self._display_box):
             box.adjustSize()
         self._controls_column.adjustSize()
+        self._controls_scroll.updateGeometry()
+        self._main_column.updateGeometry()
+        self._reflow_central_layout()
+
+    def _on_feature_panels_changed(self) -> None:
+        """Tespit/Tarama/TX kapanınca spektrum alanı tam pencereye yayılsın."""
+        self._feature_host.equalize()
+        self._reflow_central_layout()
+        self._display.updateGeometry()
+
+    def _reflow_central_layout(self) -> None:
+        central = self.centralWidget()
+        if central is None:
+            return
+        layout = central.layout()
+        if layout is not None:
+            layout.activate()
+        central.updateGeometry()
 
     def _sync_main_splitter_to_controls(self) -> None:
         """Eski splitter senkronu — kontrol sütunu daraltması ile halledilir."""
@@ -734,10 +796,9 @@ class MainWindow(QMainWindow):
         self._detection_panel.frequency_selected.connect(self._on_detection_frequency_selected)
         self._scan_panel.start_requested.connect(self._on_scan_start_requested)
         self._scan_panel.stop_requested.connect(self._on_scan_stop_requested)
-        self._tx_panel.capture_requested.connect(self._on_tx_capture_requested)
-        self._tx_panel.replay_requested.connect(self._on_tx_replay_requested)
+        self._tx_panel.oneshot_requested.connect(self._on_tx_oneshot_requested)
+        self._tx_panel.loop_requested.connect(self._on_tx_loop_requested)
         self._tx_panel.stop_requested.connect(self._on_tx_stop_requested)
-        self._tx_panel.clear_requested.connect(self._on_tx_clear_requested)
         self._scan_bridge.progress.connect(self._apply_scan_progress)
         self._scan_bridge.finished.connect(self._finish_scan)
         self._scan_bridge.step_peaks.connect(self._publish_scan_detection_state)
@@ -1362,7 +1423,6 @@ class MainWindow(QMainWindow):
         if self._detection_worker is not None:
             self._detection_worker.set_enabled(False)
         self._pipeline.stop()
-        self._abort_tx_capture("Yakalama iptal (RX durdu).")
         self._stop_tx_transmission()
         try:
             self._device.disconnect()
@@ -1436,7 +1496,6 @@ class MainWindow(QMainWindow):
 
         self._capture_config_from_ui()
         self._stop_audio()
-        self._abort_tx_capture()
         self._stop_tx_transmission()
         self._active_device_id = device_id
         self._config.device_id = device_id
@@ -1451,6 +1510,7 @@ class MainWindow(QMainWindow):
         self._sync_display_tuning()
         self._update_device_availability_ui()
         self._sync_tx_backend_label()
+        self._sync_duplex_sample_rate_hint()
 
         available, reason = device_availability(device_id)
         if available:
@@ -1790,12 +1850,11 @@ class MainWindow(QMainWindow):
         self._detection_panel.clear()
         self._pipeline = self._build_pipeline()
 
-        layout = self.centralWidget().layout()
-        assert layout is not None
-        self._content_row.removeWidget(self._display)
+        index = self._main_layout.indexOf(self._display)
+        self._main_layout.removeWidget(self._display)
         self._display.deleteLater()
         self._display = self._create_display()
-        self._content_row.insertWidget(0, self._display, stretch=1)
+        self._main_layout.insertWidget(index, self._display, stretch=1)
 
         if was_connected:
             self._device.connect()
@@ -1878,125 +1937,46 @@ class MainWindow(QMainWindow):
             return
         self._tx_panel.set_backend_label("Simülasyon: Mock TX (gerçek RF yok)")
 
-    def _refresh_tx_panel_from_session(self) -> None:
-        capture = self._tx_session.latest
-        if capture is None:
-            self._tx_panel.set_has_capture(False)
-            self._tx_panel.set_capture_summary("Yakalama yok")
-            self._tx_panel.set_rolling_code_status(
-                "Kayan kod: henüz yeterli yakalama yok."
+    def _sync_duplex_sample_rate_hint(self) -> None:
+        """Pluto'da Sample rate satırına eşzamanlı RX+TX spektrum tavanını yaz."""
+        if self._active_device_id == PLUTO_DEVICE_ID:
+            hint = pluto_duplex_spectrum_hint()
+            self._sample_rate_label.setText(f"Sample rate ({hint})")
+            self._sample_rate_label.setToolTip(
+                "ADALM-Pluto USB 2.0 üzerinde RX ve TX aynı anda açıkken güvenilir "
+                "örnekleme tavanı. Görünür spektrum = sample rate (±Fs/2)."
             )
             return
-        count = len(self._tx_session.captures)
-        self._tx_panel.set_has_capture(True)
-        self._tx_panel.set_capture_summary(
-            f"Yakalama {count}: {format_capture_summary(capture)}"
-        )
-        assessment = self._tx_session.assessment
-        self._tx_panel.set_rolling_code_status(
-            assessment.message,
-            warning=assessment.status == "probably_rolling",
-        )
+        self._sample_rate_label.setText("Sample rate")
+        self._sample_rate_label.setToolTip("")
 
-    def _on_tx_capture_requested(self) -> None:
-        if self._tx_session.is_capturing or self._tx_panel.is_transmitting():
-            return
-        if not self._pipeline.is_running:
-            self._tx_panel.set_status_message(
-                "Yakalama için önce Start ile RX'i başlatın."
-            )
+    def _on_tx_oneshot_requested(self) -> None:
+        self._start_test_tx(loop=False)
+
+    def _on_tx_loop_requested(self) -> None:
+        self._start_test_tx(loop=True)
+
+    def _start_test_tx(self, *, loop: bool) -> None:
+        if self._tx_panel.is_transmitting() or self._tx_loop_active:
             return
 
-        duration_s = self._tx_panel.capture_duration_s()
-        needed = int(self._device.sample_rate_hz * duration_s)
-        self._tx_session.begin_capture(needed)
-        self._tx_capture_queue = self._pipeline.add_raw_consumer(maxsize=64)
-        self._tx_capture_deadline = time.monotonic() + max(8.0, duration_s * 6.0)
-        self._tx_panel.set_busy(True)
-        self._tx_panel.set_status_message("Yakalanıyor…")
-        self._tx_capture_timer.start()
-
-    def _poll_tx_capture(self) -> None:
-        queue = self._tx_capture_queue
-        if queue is None:
-            self._tx_capture_timer.stop()
-            return
-
-        enough = False
-        while True:
-            block = queue.try_get()
-            if block is None:
-                break
-            if self._tx_session.ingest_block(block):
-                enough = True
-                break
-
-        if enough:
-            self._finish_tx_capture()
-            return
-        if time.monotonic() >= self._tx_capture_deadline:
-            if self._tx_session.collected_samples > 0:
-                self._finish_tx_capture()
-            else:
-                self._abort_tx_capture("Yakalama zaman aşımı (IQ gelmedi).")
-
-    def _finish_tx_capture(self) -> None:
-        self._detach_tx_capture_queue()
-        try:
-            self._tx_session.finish_capture(self._device.sample_rate_hz)
-        except Exception as exc:
-            self._tx_panel.set_busy(False)
-            self._tx_panel.set_status_message(f"Yakalama çözülemedi: {exc}")
-            return
-        self._tx_panel.set_busy(False)
-        self._refresh_tx_panel_from_session()
-        self._tx_panel.set_status_message("Yakalama tamam.")
-
-    def _abort_tx_capture(self, message: str | None = None) -> None:
-        was_capturing = self._tx_session.is_capturing
-        self._detach_tx_capture_queue()
-        self._tx_session.abort_capture()
-        if was_capturing:
-            self._tx_panel.set_busy(False)
-            if message:
-                self._tx_panel.set_status_message(message)
-
-    def _detach_tx_capture_queue(self) -> None:
-        queue = self._tx_capture_queue
-        self._tx_capture_queue = None
-        self._tx_capture_timer.stop()
-        if queue is None:
-            return
-        try:
-            self._pipeline.remove_raw_consumer(queue)
-        except Exception:
-            logger.debug("remove TX capture consumer failed", exc_info=True)
-
-    def _on_tx_clear_requested(self) -> None:
-        self._abort_tx_capture()
-        self._tx_session.clear()
-        self._refresh_tx_panel_from_session()
-        self._tx_panel.set_status_message("Yakalamalar temizlendi.")
-
-    def _on_tx_replay_requested(self) -> None:
-        capture = self._tx_session.latest
-        if capture is None:
-            self._tx_panel.set_status_message("Önce bir yakalama alın.")
-            return
-
-        assessment = self._tx_session.assessment
+        duration_s = min(self._tx_panel.duration_s(), DEFAULT_MAX_TX_DURATION_S)
+        interval_s = self._tx_panel.interval_s()
+        freq_hz = self._tx_panel.tx_freq_hz()
+        att = self._tx_panel.attenuation_db()
+        bandwidth_hz = self._tx_panel.bandwidth_hz()
+        mode_text = "sürekli (döngü)" if loop else "tek sefer"
         confirm_text = (
             "Bu işlem seçilen TX frekansında yayın başlatabilir.\n"
             "Yasal ve güvenli kullanım sizin sorumluluğunuzdadır.\n\n"
-            f"Frekans: {self._tx_panel.tx_freq_hz() / 1_000_000.0:.3f} MHz\n"
-            f"Attenuation: {self._tx_panel.attenuation_db():.0f} dB\n"
-            f"Süre sınırı: {self._tx_panel.max_duration_s():.2f} s"
+            f"Kip: {mode_text}\n"
+            f"Frekans: {freq_hz / 1_000_000.0:.3f} MHz\n"
+            f"Bant: {bandwidth_hz / 1_000.0:.1f} kHz\n"
+            f"Attenuation: {att:.0f} dB\n"
+            f"Süre: {duration_s:.2f} s"
         )
-        if assessment.status == "probably_rolling":
-            confirm_text += (
-                "\n\nUyarı: yakalamalar kayan kod gibi görünüyor; "
-                "replay çalışmayabilir."
-            )
+        if loop:
+            confirm_text += f"\nAralık: {interval_s:.2f} s"
         confirm_text += "\n\nYayına devam edilsin mi?"
 
         reply = QMessageBox.question(
@@ -2007,25 +1987,16 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
-            self._tx_panel.set_status_message("Replay iptal edildi.")
+            self._tx_panel.set_status_message("Yayın iptal edildi.")
             return
 
-        if self._active_device_id == PLUTO_DEVICE_ID and self._pipeline.is_running:
-            self._tx_panel.set_status_message(
-                "Pluto TX için önce Stop ile RX'i durdurun (aynı cihaz)."
-            )
-            return
+        self._retune_to_frequency(freq_hz)
 
         try:
-            device = self._create_tx_device(capture.sample_rate_hz)
-            device.set_tx_freq(self._tx_panel.tx_freq_hz())
-            replay_capture(
-                device,
-                capture,
-                attenuation_db=self._tx_panel.attenuation_db(),
-                max_duration_s=self._tx_panel.max_duration_s(),
-                confirmed=True,
-            )
+            device = self._create_tx_device()
+            device.set_tx_freq(freq_hz)
+            device.set_tx_attenuation_db(att)
+            device.set_tx_bandwidth_hz(bandwidth_hz)
         except TXError as exc:
             self._release_tx_device()
             self._tx_panel.set_status_message(f"TX hata: {exc}")
@@ -2035,29 +2006,74 @@ class MainWindow(QMainWindow):
             self._tx_panel.set_status_message(f"TX hata: {exc}")
             return
 
+        self._tx_loop_active = loop
         self._tx_panel.set_transmitting(True)
-        self._tx_panel.set_status_message("Yayın başladı.")
+        if not self._fire_tx_burst():
+            return
         self._tx_idle_timer.start()
+        suffix = ""
+        if self._active_device_id == PLUTO_DEVICE_ID and not self._pipeline.is_running:
+            suffix = " Waterfall için Start ile RX açın."
+        self._tx_panel.set_status_message(
+            ("Yayın döngüsü başladı." if loop else "Yayın başladı.") + suffix
+        )
 
-    def _create_tx_device(self, sample_rate_hz: float) -> TXCapableDevice:
+    def _fire_tx_burst(self) -> bool:
+        device = self._tx_device
+        if device is None:
+            self._stop_tx_transmission()
+            self._tx_panel.set_status_message("TX hata: cihaz yok.")
+            return False
+
+        duration_s = min(self._tx_panel.duration_s(), DEFAULT_MAX_TX_DURATION_S)
+        sample_rate = float(
+            getattr(device, "sample_rate_hz", None) or self._device.sample_rate_hz
+        )
+        bandwidth_hz = self._tx_panel.bandwidth_hz()
+        try:
+            iq = generate_noise_plus_tone(sample_rate, bandwidth_hz)
+            device.set_tx_freq(self._tx_panel.tx_freq_hz())
+            device.set_tx_attenuation_db(self._tx_panel.attenuation_db())
+            device.set_tx_bandwidth_hz(bandwidth_hz)
+            device.transmit(iq, cyclic=True, max_duration_s=duration_s)
+        except TXError as exc:
+            self._stop_tx_transmission()
+            self._tx_panel.set_status_message(f"TX hata: {exc}")
+            return False
+        except Exception as exc:
+            self._stop_tx_transmission()
+            self._tx_panel.set_status_message(f"TX hata: {exc}")
+            return False
+        return True
+
+    def _create_tx_device(self) -> TXCapableDevice:
         self._release_tx_device()
         freq = self._tx_panel.tx_freq_hz()
         att = self._tx_panel.attenuation_db()
+        bandwidth_hz = self._tx_panel.bandwidth_hz()
         if self._active_device_id == PLUTO_DEVICE_ID:
+            shared = getattr(self._device, "iio_backend", None)
+            lock = getattr(self._device, "iio_lock", None)
+            use_shared = bool(self._device.is_connected and shared is not None)
             device: TXCapableDevice = PlutoTXDevice(
                 tx_freq_hz=freq,
-                sample_rate_hz=sample_rate_hz,
+                sample_rate_hz=self._device.sample_rate_hz,
                 attenuation_db=att,
                 uri=self._config.device_uri,
+                bandwidth_hz=bandwidth_hz,
+                shared_sdr=shared if use_shared else None,
+                shared_lock=lock if use_shared else None,
             )
-            connect = getattr(device, "connect", None)
-            if callable(connect):
-                connect()
+            if not bool(getattr(device, "is_connected", False)):
+                connect = getattr(device, "connect", None)
+                if callable(connect):
+                    connect()
             self._tx_device = device
             return device
-        device = MockTXDevice(tx_freq_hz=freq, attenuation_db=att)
-        self._tx_device = device
-        return device
+        mock = MockTXDevice(tx_freq_hz=freq, attenuation_db=att)
+        mock.set_tx_bandwidth_hz(bandwidth_hz)
+        self._tx_device = mock
+        return mock
 
     def _on_tx_stop_requested(self) -> None:
         self._stop_tx_transmission()
@@ -2065,13 +2081,29 @@ class MainWindow(QMainWindow):
 
     def _poll_tx_idle(self) -> None:
         device = self._tx_device
-        if device is None or not device.is_transmitting:
+        if device is not None and device.is_transmitting:
+            return
+        if self._tx_loop_active:
+            interval_ms = max(100, int(self._tx_panel.interval_s() * 1000.0))
             self._tx_idle_timer.stop()
-            self._tx_panel.set_transmitting(False)
-            if device is not None:
-                self._tx_panel.set_status_message("Yayın durdu.")
+            self._tx_panel.set_status_message("Aralık bekleniyor…")
+            self._tx_gap_timer.start(interval_ms)
+            return
+        self._tx_idle_timer.stop()
+        self._release_tx_device()
+        self._tx_panel.set_transmitting(False)
+        self._tx_panel.set_status_message("Yayın durdu.")
+
+    def _on_tx_gap_elapsed(self) -> None:
+        if not self._tx_loop_active:
+            return
+        if not self._fire_tx_burst():
+            return
+        self._tx_idle_timer.start()
 
     def _stop_tx_transmission(self) -> None:
+        self._tx_loop_active = False
+        self._tx_gap_timer.stop()
         self._tx_idle_timer.stop()
         self._release_tx_device()
         self._tx_panel.set_transmitting(False)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
@@ -33,11 +33,10 @@ class ScanPanel(QGroupBox):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__("Tarama Modu", parent)
-        self.setMinimumWidth(280)
-        self.setMaximumWidth(420)
+        self.setMinimumWidth(0)
         self.setSizePolicy(
-            QSizePolicy.Policy.Preferred,
-            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
         )
 
         default_step_hz = default_scan_step_hz(sample_rate_hz)
@@ -78,6 +77,11 @@ class ScanPanel(QGroupBox):
         )
 
         form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        form.setHorizontalSpacing(8)
+        form.setVerticalSpacing(6)
         form.addRow("Başlangıç", self._start_freq_spin)
         form.addRow("Bitiş", self._end_freq_spin)
         form.addRow("Adım", self._step_spin)
@@ -93,15 +97,25 @@ class ScanPanel(QGroupBox):
         self._start_button = QPushButton("Taramayı Başlat")
         self._stop_button = QPushButton("Durdur")
         self._stop_button.setEnabled(False)
+        for button in (self._start_button, self._stop_button):
+            button.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
+            button.setMinimumHeight(28)
         button_row = QHBoxLayout()
+        button_row.setSpacing(8)
         button_row.addWidget(self._start_button)
         button_row.addWidget(self._stop_button)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 12, 8, 8)
+        layout.setSpacing(8)
         layout.addLayout(form)
         layout.addWidget(self._progress)
         layout.addWidget(self._status_label)
         layout.addLayout(button_row)
+        layout.addStretch()
 
         self._start_button.clicked.connect(self.start_requested.emit)
         self._stop_button.clicked.connect(self.stop_requested.emit)

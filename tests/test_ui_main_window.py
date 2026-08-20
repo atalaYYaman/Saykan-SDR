@@ -655,7 +655,7 @@ def test_feature_docks_are_visible_by_default(window: MainWindow, qtbot) -> None
     assert window._tx_panel.isVisible()
     assert window._detection_panel.title() == "Sinyal Tespiti"
     assert window._scan_panel.title() == "Tarama Modu"
-    assert window._tx_panel.title() == "TX / Replay"
+    assert window._tx_panel.title() == "TX / Test"
     assert window._feature_host.isVisible()
     assert not window._hover_drawer.is_expanded()
 
@@ -664,8 +664,11 @@ def test_control_docks_stack_on_left_and_feature_docks_on_right(
     window: MainWindow,
 ) -> None:
     assert window._hover_drawer.parentWidget() is not None
-    assert window._controls_scroll.parentWidget() is not None
+    assert window._controls_scroll.parentWidget() is window._main_column
+    assert window._display.parentWidget() is window._main_column
     assert window._receiver_box.parentWidget() is window._controls_column
+    assert window._audio_box.parentWidget() is window._controls_column
+    assert window._display_box.parentWidget() is window._controls_column
     assert window._feature_host.parentWidget() is not None
 
 

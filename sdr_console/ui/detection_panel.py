@@ -9,8 +9,8 @@ from PyQt6.QtWidgets import (
     QDialog,
     QDoubleSpinBox,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
-    QHBoxLayout,
     QHeaderView,
     QLabel,
     QPushButton,
@@ -85,10 +85,9 @@ class DetectionPanel(QGroupBox):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__("Sinyal Tespiti", parent)
-        self.setMinimumWidth(280)
-        self.setMaximumWidth(420)
+        self.setMinimumWidth(0)
         self.setSizePolicy(
-            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
 
@@ -141,6 +140,13 @@ class DetectionPanel(QGroupBox):
         self._controls_hint.setStyleSheet("color: palette(mid);")
 
         controls = QFormLayout()
+        controls.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        controls.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        controls.setLabelAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        controls.setHorizontalSpacing(8)
+        controls.setVerticalSpacing(6)
         controls.addRow(self._enabled_check)
         controls.addRow(threshold_label, self._threshold_spin)
         controls.addRow(merge_label, self._merge_bandwidth_spin)
@@ -215,16 +221,31 @@ class DetectionPanel(QGroupBox):
         self._remove_selected_button = QPushButton("Seçilenleri Sil")
         self._popout_button = QPushButton("Büyüt")
         self._popout_button.setToolTip("Listeyi ayrı, yeniden boyutlandırılabilir pencerede aç")
-        button_row = QHBoxLayout()
-        button_row.addWidget(self._clear_all_button)
-        button_row.addWidget(self._remove_selected_button)
-        button_row.addWidget(self._popout_button)
+        button_grid = QGridLayout()
+        button_grid.setContentsMargins(0, 4, 0, 0)
+        button_grid.setHorizontalSpacing(8)
+        button_grid.setVerticalSpacing(8)
+        for button in (
+            self._clear_all_button,
+            self._remove_selected_button,
+            self._popout_button,
+        ):
+            button.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
+            button.setMinimumHeight(28)
+        button_grid.addWidget(self._clear_all_button, 0, 0)
+        button_grid.addWidget(self._remove_selected_button, 0, 1)
+        button_grid.addWidget(self._popout_button, 1, 0, 1, 2)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 12, 8, 8)
+        layout.setSpacing(8)
         layout.addLayout(controls)
         layout.addWidget(self._controls_hint)
         layout.addWidget(self._list_host, stretch=1)
-        layout.addLayout(button_row)
+        layout.addLayout(button_grid)
 
         self._enabled_check.toggled.connect(self.toggled)
         self._threshold_spin.valueChanged.connect(self.threshold_changed)

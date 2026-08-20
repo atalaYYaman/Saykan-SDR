@@ -10,6 +10,7 @@ import numpy as np
 from sdr_console.tx.constants import (
     DEFAULT_MAX_TX_DURATION_S,
     DEFAULT_TX_ATTENUATION_DB,
+    DEFAULT_TX_BANDWIDTH_HZ,
     MIN_TX_ATTENUATION_DB,
 )
 from sdr_console.tx.errors import TXAttenuationLimitError
@@ -46,6 +47,7 @@ class MockTXDevice(TXCapableDevice):
     ) -> None:
         self._tx_freq_hz = float(tx_freq_hz)
         self._attenuation_db = _validate_attenuation(attenuation_db)
+        self._bandwidth_hz = float(DEFAULT_TX_BANDWIDTH_HZ)
         self._lock = threading.RLock()
         self._is_transmitting = False
         self._transmitted_iq: np.ndarray | None = None
@@ -87,6 +89,16 @@ class MockTXDevice(TXCapableDevice):
     def set_tx_attenuation_db(self, attenuation_db: float) -> None:
         with self._lock:
             self._attenuation_db = _validate_attenuation(attenuation_db)
+
+    def set_tx_bandwidth_hz(self, bandwidth_hz: float) -> None:
+        if bandwidth_hz <= 0:
+            raise ValueError("bandwidth_hz must be positive")
+        with self._lock:
+            self._bandwidth_hz = float(bandwidth_hz)
+
+    @property
+    def bandwidth_hz(self) -> float:
+        return self._bandwidth_hz
 
     def transmit(
         self,

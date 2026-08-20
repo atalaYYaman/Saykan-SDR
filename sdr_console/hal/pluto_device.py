@@ -98,6 +98,18 @@ class PlutoSDRDevice(SDRDeviceInterface):
         self._lock = threading.RLock()
         self._residual: np.ndarray = np.empty(0, dtype=np.complex64)
 
+    # ------------------------------------------------------------------ TX attachment (shared IIO)
+
+    @property
+    def iio_backend(self) -> Any | None:
+        """Live pyadi-iio handle for TX on the same USB context. None if disconnected."""
+        return self._sdr
+
+    @property
+    def iio_lock(self) -> threading.RLock:
+        """Lock covering all libiio access; TX must share this with RX reads."""
+        return self._lock
+
     # ------------------------------------------------------------------ properties
 
     @property

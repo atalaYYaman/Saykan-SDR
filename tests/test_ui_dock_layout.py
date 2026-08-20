@@ -104,4 +104,76 @@ def test_all_registered_panels_have_toolbar_short_labels(shown_window: MainWindo
 
 def test_feature_host_sits_right_of_the_display(shown_window: MainWindow) -> None:
     assert shown_window._feature_host.x() > shown_window._display.x()
-    assert shown_window._controls_scroll.x() < shown_window._display.x()
+    assert shown_window._controls_scroll.y() < shown_window._display.y()
+
+
+def test_receiver_audio_display_sit_side_by_side_above_waterfall(
+    shown_window: MainWindow,
+) -> None:
+    assert shown_window._audio_box.x() > shown_window._receiver_box.x()
+    assert shown_window._display_box.x() > shown_window._audio_box.x()
+    assert shown_window._receiver_box.y() < shown_window._display.y()
+    assert shown_window._audio_box.y() < shown_window._display.y()
+    assert shown_window._display_box.y() < shown_window._display.y()
+
+    waterfall = shown_window._display.waterfall
+    spectrum = shown_window._display.spectrum
+    assert waterfall.y() >= spectrum.y()
+    assert waterfall.width() >= shown_window._display.width() - 8
+    assert waterfall.width() > waterfall.height()
+
+
+def test_hiding_a_panel_gives_remaining_panels_the_column(shown_window: MainWindow, qtbot) -> None:
+    host = shown_window._feature_host
+    height_with_three = shown_window._scan_panel.height()
+
+    shown_window._panel_toolbar.toggle_action_for("dock_detection").trigger()
+    shown_window._panel_toolbar.toggle_action_for("dock_tx").trigger()
+    qtbot.waitUntil(
+        lambda: host.is_panel_visible("dock_scan")
+        and not host.is_panel_visible("dock_detection")
+        and not host.is_panel_visible("dock_tx"),
+        timeout=2000,
+    )
+
+    assert host.isVisible()
+    assert shown_window._scan_panel.isVisible()
+    assert shown_window._scan_panel.height() > height_with_three
+    assert shown_window._scan_panel.height() >= int(host.height() * 0.7)
+
+
+def test_audio_and_receiver_controls_stay_inside_their_frames(
+    shown_window: MainWindow,
+) -> None:
+    audio_box = shown_window._audio_box
+    for widget in (
+        shown_window._audio_check,
+        shown_window._demod_combo,
+        shown_window._deemphasis_combo,
+        shown_window._nfm_deemphasis_check,
+        shown_window._afbw_combo,
+        shown_window._agc_check,
+        shown_window._agc_combo,
+        shown_window._squelch_check,
+        shown_window._squelch_spin,
+        shown_window._volume_slider,
+        shown_window._volume_spin,
+    ):
+        assert widget.isVisible()
+        assert widget.width() > 0
+        assert widget.height() > 0
+        mapped = widget.mapTo(audio_box, widget.rect().topLeft())
+        assert mapped.x() >= 0
+        assert mapped.x() + widget.width() <= audio_box.width() + 2
+
+    for widget in (
+        shown_window._center_freq_spin,
+        shown_window._listen_freq_spin,
+        shown_window._gain_spin,
+        shown_window._fft_size_combo,
+        shown_window._bandwidth_combo,
+        shown_window._vmin_spin,
+        shown_window._vmax_spin,
+    ):
+        assert widget.isVisible()
+        assert widget.width() > 0

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
 from sdr_console.dsp.channel import ChannelSpec
 from sdr_console.dsp.frame import SpectrumFrame
@@ -40,6 +40,8 @@ class SdrDisplayWidget(QWidget):
         self._fft_size = fft_size
         self._settings = settings or DisplaySettings()
         self._syncing_overlay = False
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMinimumSize(0, 0)
 
         self._spectrum = SpectrumWidget(
             fft_size,
@@ -65,9 +67,9 @@ class SdrDisplayWidget(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-        layout.addWidget(self._spectrum, stretch=0)
+        layout.setSpacing(0)
         self._spectrum.setFixedHeight(self._settings.spectrum_plot_height)
+        layout.addWidget(self._spectrum, stretch=0)
         layout.addWidget(self._waterfall, stretch=1)
 
         self._spectrum.frequency_clicked.connect(self.frequency_selected)

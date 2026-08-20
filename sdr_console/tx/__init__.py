@@ -25,12 +25,13 @@ from sdr_console.tx.pluto_tx import PlutoTXDevice
 from sdr_console.tx.replay import replay_capture
 from sdr_console.tx.session import ReplaySession, format_capture_summary
 from sdr_console.tx.verify import (
+    VerificationResult,
     assess_transmission,
     simulate_loopback_capture,
     simulate_loopback_iq,
     verify_transmission,
-    VerificationResult,
 )
+from sdr_console.tx.waveform import generate_noise_plus_tone
 
 __all__ = [
     "analyze_capture",
@@ -45,6 +46,7 @@ __all__ = [
     "DEFAULT_MAX_TX_DURATION_S",
     "DEFAULT_TX_ATTENUATION_DB",
     "envelope_detect",
+    "generate_noise_plus_tone",
     "MAX_TX_GAIN_DB",
     "MIN_TX_ATTENUATION_DB",
     "MockTXDevice",

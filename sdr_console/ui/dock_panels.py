@@ -1,10 +1,9 @@
 """QDockWidget yardımcıları — özellik panelleri için ortak oluşturma.
 
-Yerleşim notları (QMainWindow dock sistemi):
-- Sol: Receiver/Audio/Display sabit sütun; Tespit/Tarama/TX toggle'ları HoverDrawer.
-- Sağ özellik panelleri (Sinyal Tespiti/Tarama/TX) sağda sabit, yüzer pop-up yok.
-  Açık olanlar dikey bölünür (`splitDockWidget`); sekmeli değil.
-- Tüm dock'lar kapatıldığında merkez spektrum alanı genişler.
+Yerleşim notları:
+- Üst: Receiver / Audio / Display yan yana; Tespit/Tarama/TX toggle'ları HoverDrawer.
+- Alt sol: spektrum + yatay waterfall. Sağ: Tespit/Tarama/TX.
+- Tüm özellik panelleri kapatıldığında spektrum/waterfall alanı genişler.
 """
 
 from __future__ import annotations

@@ -59,7 +59,14 @@ class FakePluto:
         self.rx_lo = 100_000_000
         self.gain_control_mode_chan0 = "manual"
         self.rx_hardwaregain_chan0 = 40.0
+        self.tx_enabled_channels = [0]
+        self.tx_buffer_size = 1024
+        self.tx_rf_bandwidth = 2_048_000
+        self.tx_lo = 100_000_000
+        self.tx_hardwaregain_chan0 = -50.0
+        self.tx_cyclic_buffer = False
         self._rx_calls = 0
+        self._tx_calls = 0
         self._ctx = _FakeContext(
             [
                 _FakeDevice(
@@ -92,6 +99,13 @@ class FakePluto:
         return np.full(self.rx_buffer_size, 2048 + 0j, dtype=np.complex64)
 
     def rx_destroy_buffer(self) -> None:
+        return None
+
+    def tx(self, iq: np.ndarray) -> None:
+        self._tx_calls += 1
+        self._last_tx = np.asarray(iq)
+
+    def tx_destroy_buffer(self) -> None:
         return None
 
 
@@ -191,6 +205,17 @@ def test_pluto_setters_update_fake_hardware(monkeypatch: pytest.MonkeyPatch) -> 
     assert device.gain_mode == "slow_attack"
 
     device.disconnect()
+
+
+def test_pluto_exposes_iio_handle_for_shared_tx(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_adi(monkeypatch)
+    device = PlutoSDRDevice()
+    assert device.iio_backend is None
+    device.connect()
+    assert device.iio_backend is device._sdr
+    assert device.iio_lock is device._lock
+    device.disconnect()
+    assert device.iio_backend is None
 
 
 def test_static_pluto_capabilities_are_continuous() -> None:

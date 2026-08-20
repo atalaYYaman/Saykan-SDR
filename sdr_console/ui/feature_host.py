@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QSizePolicy, QSplitter, QVBoxLayout, QWidget
 
 FEATURE_HOST_MIN_WIDTH_PX = 300
 FEATURE_HOST_MAX_WIDTH_PX = 440
+_QWIDGETSIZE_MAX = 16777215
 
 
 class FeaturePanelHost(QWidget):
@@ -29,16 +30,22 @@ class FeaturePanelHost(QWidget):
         self._wanted: dict[str, bool] = {}
         self._splitter = QSplitter(Qt.Orientation.Vertical, self)
         self._splitter.setChildrenCollapsible(True)
+        self._splitter.setHandleWidth(8)
 
         for name, widget in panels:
             widget.setObjectName(name)
-            widget.setMaximumWidth(16777215)
+            widget.setMinimumWidth(0)
+            widget.setMaximumWidth(_QWIDGETSIZE_MAX)
+            widget.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Expanding,
+            )
             self._panels[name] = widget
             self._wanted[name] = True
             self._splitter.addWidget(widget)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(4, 0, 4, 0)
         layout.setSpacing(0)
         layout.addWidget(self._splitter)
 
@@ -62,15 +69,35 @@ class FeaturePanelHost(QWidget):
         if self._wanted[name] == visible:
             return
         self._wanted[name] = visible
-        self._panels[name].setVisible(visible)
+        widget = self._panels[name]
+        widget.setVisible(visible)
+        if visible:
+            widget.setMinimumHeight(0)
+            widget.setMaximumHeight(_QWIDGETSIZE_MAX)
+        else:
+            widget.setMinimumHeight(0)
+            widget.setMaximumHeight(0)
         self.equalize()
         self.visibility_changed.emit()
 
     def equalize(self) -> None:
         """Açık paneller yüksekliği eşit paylaşsın; hiçbiri yoksa host gizlensin."""
         any_visible = any(self._wanted.values())
-        self.setVisible(any_visible)
         if not any_visible:
+            self.setMinimumWidth(0)
+            self.setMaximumWidth(0)
+            self.setVisible(False)
             return
+
+        self.setMinimumWidth(FEATURE_HOST_MIN_WIDTH_PX)
+        self.setMaximumWidth(FEATURE_HOST_MAX_WIDTH_PX)
+        self.setVisible(True)
         sizes = [1000 if self._wanted[name] else 0 for name in self._panels]
         self._splitter.setSizes(sizes)
+        self.updateGeometry()
+        parent = self.parentWidget()
+        if parent is not None:
+            parent.updateGeometry()
+            layout = parent.layout()
+            if layout is not None:
+                layout.activate()

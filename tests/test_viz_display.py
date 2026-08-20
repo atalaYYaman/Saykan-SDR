@@ -55,3 +55,23 @@ def test_poll_queue_refreshes_once_and_keeps_latest_row(
 
     assert refresh_calls["count"] == 1
     np.testing.assert_allclose(display.waterfall.history[-1], np.full(64, -50.0))
+
+
+def test_waterfall_fills_below_spectrum_without_aspect_lock(qtbot) -> None:
+    widget = SdrDisplayWidget(
+        fft_size=64,
+        settings=DisplaySettings(history_rows=8, spectrum_plot_height=80),
+    )
+    qtbot.addWidget(widget)
+    widget.resize(640, 480)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    view_box = widget.waterfall.getPlotItem().getViewBox()
+    aspect = view_box.state["aspectLocked"]
+    assert aspect is False or aspect == 0
+
+    assert widget.waterfall.y() >= widget.spectrum.y()
+    assert widget.waterfall.width() >= widget.width() - 8
+    assert widget.waterfall.height() > widget.spectrum.height()
+    assert widget.waterfall.x() <= 8
