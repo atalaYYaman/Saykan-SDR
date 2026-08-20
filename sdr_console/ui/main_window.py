@@ -92,6 +92,7 @@ from sdr_console.ui.feature_host import FeaturePanelHost
 from sdr_console.ui.hover_drawer import HoverDrawer
 from sdr_console.ui.panel_toolbar import PanelToolBar
 from sdr_console.ui.scan_panel import ScanPanel
+from sdr_console.ui.theme import apply_application_theme
 from sdr_console.ui.tx_panel import TxPanel
 from sdr_console.viz.sdr_display import SdrDisplayWidget
 from sdr_console.viz.settings import DisplaySettings
@@ -206,6 +207,7 @@ class MainWindow(QMainWindow):
         config_path: Path | None = None,
     ) -> None:
         super().__init__()
+        apply_application_theme()
         self._config_path = config_path
         self._config = config or AppConfig.default()
         self._runtime_defaults = self._config.to_defaults()
@@ -308,6 +310,7 @@ class MainWindow(QMainWindow):
         )
         display.frequency_selected.connect(self._on_frequency_selected)
         display.channel_moved.connect(self._on_frequency_selected)
+        display.setObjectName("display_center")
         return display
 
     def _build_pipeline(self) -> Pipeline:
@@ -376,19 +379,28 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
 
-        transport_row = QHBoxLayout()
+        transport_host = QWidget()
+        transport_host.setObjectName("toolbar_main")
+        transport_row = QHBoxLayout(transport_host)
+        transport_row.setContentsMargins(12, 6, 12, 6)
+        transport_row.setSpacing(8)
         self._device_combo = QComboBox()
+        self._device_combo.setObjectName("transport_device")
         for device_id, label in DEVICE_CHOICES:
             self._device_combo.addItem(label, device_id)
 
         self._uri_edit = QLineEdit()
+        self._uri_edit.setObjectName("transport_uri")
         self._uri_edit.setPlaceholderText("auto / ip:192.168.2.1 / usb:")
         self._uri_edit.setMinimumWidth(180)
         self._uri_edit.setText(self._config.device_uri)
 
         self._scan_button = QPushButton("Scan")
+        self._scan_button.setObjectName("transport_scan")
         self._start_button = QPushButton("Start")
+        self._start_button.setObjectName("transport_start")
         self._stop_button = QPushButton("Stop")
+        self._stop_button.setObjectName("transport_stop")
         self._stop_button.setEnabled(False)
 
         transport_row.addWidget(QLabel("Device:"))
@@ -399,9 +411,10 @@ class MainWindow(QMainWindow):
         transport_row.addWidget(self._start_button)
         transport_row.addWidget(self._stop_button)
         transport_row.addStretch()
-        root.addLayout(transport_row)
+        root.addWidget(transport_host)
 
         self._receiver_box = CollapsibleGroupBox("Receiver")
+        self._receiver_box.setObjectName("group_receiver")
         tuning_form = _control_form()
         self._receiver_box.content_widget().setLayout(tuning_form)
         caps = self._device.capabilities
@@ -491,6 +504,7 @@ class MainWindow(QMainWindow):
         tuning_form.addRow("Channel", self._vfo_label)
 
         self._audio_box = CollapsibleGroupBox("Audio")
+        self._audio_box.setObjectName("group_audio")
         audio_form = _control_form()
         self._audio_box.content_widget().setLayout(audio_form)
         self._audio_check = QCheckBox("Enable")
@@ -575,6 +589,7 @@ class MainWindow(QMainWindow):
         )
 
         self._display_box = CollapsibleGroupBox("Display")
+        self._display_box.setObjectName("group_display")
         display_form = _control_form()
         self._display_box.content_widget().setLayout(display_form)
         self._vmin_spin = QDoubleSpinBox()
@@ -593,7 +608,7 @@ class MainWindow(QMainWindow):
         self._display_box.setMinimumWidth(180)
 
         self._controls_column = QWidget()
-        self._controls_column.setObjectName("controls_column")
+        self._controls_column.setObjectName("dock_left_controls")
         controls_layout = QHBoxLayout(self._controls_column)
         controls_layout.setContentsMargins(6, 4, 6, 4)
         controls_layout.setSpacing(8)
@@ -660,19 +675,12 @@ class MainWindow(QMainWindow):
         self._feature_host.visibility_changed.connect(self._on_feature_panels_changed)
 
         self._status_label = QLabel("Idle")
+        self._status_label.setObjectName("status_bar")
         status_font = QFont(self._status_label.font())
         point_size = status_font.pointSize()
         status_font.setPointSize(point_size + 2 if point_size > 0 else 11)
         status_font.setBold(True)
         self._status_label.setFont(status_font)
-        self._status_label.setStyleSheet(
-            "QLabel {"
-            " color: palette(window-text);"
-            " background: palette(base);"
-            " border-top: 1px solid palette(mid);"
-            " padding: 6px 8px;"
-            "}"
-        )
         self._status_label.setMinimumHeight(28)
         root.addWidget(self._status_label)
 

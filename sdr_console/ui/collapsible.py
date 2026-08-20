@@ -23,20 +23,6 @@ class CollapsibleGroupBox(QGroupBox):
         super().__init__(title, parent)
         self.setCheckable(True)
         self.setChecked(True)
-        self.setStyleSheet(
-            "CollapsibleGroupBox {"
-            " border: 1px solid palette(mid);"
-            " border-radius: 4px;"
-            " margin-top: 14px;"
-            " padding-top: 4px;"
-            "}"
-            "CollapsibleGroupBox::title {"
-            " subcontrol-origin: margin;"
-            " subcontrol-position: top left;"
-            " left: 10px;"
-            " padding: 0 6px;"
-            "}"
-        )
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Maximum,

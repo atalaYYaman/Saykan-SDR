@@ -10,16 +10,31 @@ ADALM-PLUTO, HackRF vb.) gelen IQ örneklerini gerçek zamanlı işleyip
 tür ve boyutuna göre bir **waterfall / spektrum görüntüleyicisine**
 yazdırmak.
  
+Görsel dil: koyu, yoğun, operatör odaklı ED/ET konsolu (Teknofest 2026
+Elektronik Harp şartnamesi §5: tespit, parametre, dinleme, yön bulma,
+konum, karıştırma, aldatma, GNSS aldatma). Amaç mevcut motorun yüzeyi
+ile ileride görev panellerinin aynı iskelete oturmasıdır.
+
+UI üç katman: NOW (var olan kontroller), SHELL (sabit `dock_*` yuvası,
+empty-state, token; sahte canlı veri yok), LATER (HAL/DSP/TX yeteneği
+yazılınca SHELL doldurulur). Sahte pusula, sahte GPS, sahte JSR, sahte
+jammer “çalışıyor” göstergesi yasaktır. 3D waterfall, çoklu alıcı
+matrisi, QML/web iskeleti SHELL bile değildir.
+ 
 Teknoloji yığını (sabit — değiştirilmeden önce kullanıcıya sorulmalı):
 - Python 3.11+
 - Sayısal işleme: `numpy`, `scipy`
-- Arayüz: `PyQt6` (veya PyQt5, proje başında kararlaştırılır) +
-  `pyqtgraph` (waterfall/spektrum render için)
+- Arayüz: `PyQt6` widget'ları + `QPalette` / QSS tema.
+  Spektrum/waterfall: `pyqtgraph`.
+  Yasak (kullanıcı açıkça istemedikçe): QML, PySide6, HTML/CSS web,
+  React/Vue/Tailwind, Avalonia/WPF, glassmorphism/backdrop-blur.
 - SDR erişimi: `SoapySDR` / `pyrtlsdr` / `pyadi-iio` gibi donanıma özel
   sürücü katmanları
 - Çoklu iş parçacığı: `threading` veya `multiprocessing`
   (GUI thread'i asla bloklanmamalı)
 - (Opsiyonel) Süreçler arası iletişim: `ZeroMQ`
+- Görsel token kaynağı: `design-system/MASTER.md` varsa UI/QSS/pyqtgraph
+  paleti ona uyar; skill çıktısı bu dosyadaki yığın kilidini ezemez.
 
 ## 2. Katmanlı Mimari — Agent Bu Sınırları İhlal Etmemeli
  
@@ -38,10 +53,18 @@ Kod her zaman aşağıdaki katmanlara ayrılmalı, katmanlar arası bağımlıl�
    yönetilir.
 4. **Visualization** (`sdr_console/viz/`)
    `pyqtgraph` tabanlı waterfall ve spektrum widget'ları. Sadece
-   hazır (işlenmiş) veriyi çizer, işlem yapmaz.
+   hazır (işlenmiş) veriyi çizer, işlem yapmaz. Tema renkleri
+   `design-system` token'larından alınabilir; yeni grafik motoru yok.
 5. **UI / Control** (`sdr_console/ui/`)
-   Ana pencere, cihaz seçimi, kazanç/frekans kontrolleri, ayarlar
-   paneli. `viz` katmanını kullanır, DSP'yi asla doğrudan çağırmaz.
+   Ana pencere, toolbar, cihaz seçimi, kazanç/frekans kontrolleri,
+   dock paneller, QSS tema. `viz` katmanını kullanır, DSP'yi asla
+   doğrudan çağırmaz. Hover-only keşif yerine görünür toolbar/dock
+   tercih edilir. Spektrum merkez kahraman alandır.
+   Yeni şartname yüzeyi: önce `FeaturePanelHost` + `objectName`
+   (`dock_detection`, `dock_scan`, `dock_tx`, `dock_df`, `dock_geoloc`,
+   `dock_params`, `dock_ea_jam`, `dock_ea_deceive`, `dock_ea_gnss`);
+   backend yoksa panel empty-state / disabled kalır. Yerleşim şemasını
+   her özellikte baştan çizmeyin.
 6. **Config / Persistence** (`sdr_console/config/`)
    Profil/ayar dosyaları (JSON/YAML), son kullanılan cihaz/frekans
    gibi kalıcı durum.
@@ -75,7 +98,13 @@ kısayol (örneğin UI'den doğrudan numpy FFT çağırmak) **yasak**.
   mimariyi güncellemeyi öner, sessizce sınır ihlali yapma.
 - Yeni bir bağımlılık eklemeden önce mutlaka sor — özellikle GUI
   framework'ü veya SDR kütüphanesi gibi temel seçimler kilitli kabul
-  edilmeli.
+  edilmeli. `ui-ux-pro-max` tasarım zekâsıdır; yığını HTML/React/QML'e
+  çekemez. Şartname panellerini SHELL olarak tasarlayabilir; DF, ET
+  karıştırma, GNSS aldatma için HAL/DSP/TX yazmadan “çalışır” UI
+  dolduramaz.
+- TX / ET UI'si onay, süre tavanı ve attenuation tabanını atlatacak
+  kısayol (ör. Space ile jam) önermez. Karıştırma/aldatma yalnızca
+  yetkili test bağlamında ve mevcut güvenlik modeliyle genişler.
 - Kod üretirken önce mevcut ilgili dosyaları oku, var olan
   isimlendirme/patternleri tekrar kullan.
 - Her önemli değişiklikten sonra ilgili katmanın kısa bir test/manuel
@@ -88,4 +117,9 @@ kısayol (örneğin UI'den doğrudan numpy FFT çağırmak) **yasak**.
   katmanı üzerinden gelmeli).
 - Global mutable state (özellikle donanım handle'ları) `hal` dışında
   tutulmamalı.
+- UI skill/tasarım çıktısı landing page, cam panel, ham-radyo knob
+  veya web iskeleti üretirse uygulanmaz.
+- SHELL dock'lar empty-state ile kalır; uydurma telemetri ile NOW
+  gibi gösterilmez. Yeni görev gelince önce doğru katman, sonra
+  reserved `dock_*` doldurulur.
  

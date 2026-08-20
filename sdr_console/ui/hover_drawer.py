@@ -38,12 +38,6 @@ class HoverDrawer(QWidget):
         self._rail.setObjectName("hover_drawer_rail")
         self._rail.setFixedWidth(COLLAPSED_WIDTH_PX)
         self._rail.setMouseTracking(True)
-        self._rail.setStyleSheet(
-            "QFrame#hover_drawer_rail {"
-            " background: palette(mid);"
-            " border-right: 1px solid palette(dark);"
-            "}"
-        )
 
         rail_layout = QVBoxLayout(self._rail)
         rail_layout.setContentsMargins(0, 12, 0, 12)

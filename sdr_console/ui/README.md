@@ -10,6 +10,8 @@ Ana pencere, Start/Stop, cihaz seçimi, frekans/kazanç/sample rate kontrolleri.
   sayısal giriş
 - `QTimer` — pipeline output queue'dan periyodik okuma (GUI thread'de yalnızca çizim)
 - Cihaz seçimi (Mock, Mock AM test, Pluto, RTL-SDR, HackRF)
+- Tema — `sdr_console/ui/theme/` (`design-system/MASTER.md` token'ları → Fusion
+  `QPalette` + QSS). Spektrum kalemi Tur D'de; yerleşim Tur B/C'de.
 
 **Bağımlılık yönü:** ui → viz, pipeline, hal, config, demod (factory). DSP'ye
 doğrudan erişim yasak.
