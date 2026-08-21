@@ -12,6 +12,7 @@ from sdr_console.dsp.frame import SpectrumFrame
 from sdr_console.viz.buffer import append_spectrum_row
 from sdr_console.viz.colormap import apply_colormap, apply_db_levels
 from sdr_console.viz.interaction import frequency_at_scene_pos
+from sdr_console.viz.plot_theme import apply_plot_chrome
 from sdr_console.viz.settings import DisplaySettings
 
 
@@ -65,6 +66,7 @@ class WaterfallWidget(pg.PlotWidget):
         )
 
         _prepare_fill_plot(self)
+        apply_plot_chrome(self, self._settings, grid=False)
         plot_item = self.getPlotItem()
         plot_item.setLabel("bottom", "Frequency", units="Hz")
         plot_item.setLabel("left", "Time")
@@ -103,6 +105,7 @@ class WaterfallWidget(pg.PlotWidget):
 
     def set_display_settings(self, settings: DisplaySettings) -> None:
         self._settings = settings
+        apply_plot_chrome(self, settings, grid=False)
         self.getPlotItem().getAxis("left").setWidth(settings.axis_label_width)
         self._apply_settings(settings)
 

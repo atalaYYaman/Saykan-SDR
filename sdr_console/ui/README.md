@@ -11,7 +11,7 @@ Ana pencere, Start/Stop, cihaz seçimi, frekans/kazanç/sample rate kontrolleri.
 - `QTimer` — pipeline output queue'dan periyodik okuma (GUI thread'de yalnızca çizim)
 - Cihaz seçimi (Mock, Mock AM test, Pluto, RTL-SDR, HackRF)
 - Tema — `sdr_console/ui/theme/` (`design-system/MASTER.md` token'ları → Fusion
-  `QPalette` + QSS). Spektrum kalemi Tur D'de.
+  `QPalette` + QSS). Spektrum/waterfall kalemi `viz/settings.py` + `viz/plot_theme.py`.
 - Transport — `TransportToolBar` (`QToolBar#toolbar_main`): cihaz, URI, Scan,
   Start, Stop ve ED/ET/GNSS/saat rozetleri.
 - Sağ host — `FeaturePanelHost` üstünde ED/ET sekme şeridi; NOW paneller

@@ -153,6 +153,7 @@ class FeaturePanelHost(QWidget):
                 min_total += hint
 
         self._body.setMinimumHeight(min_total)
+        self._tab_bar.sync_from_host()
         self.updateGeometry()
         parent = self.parentWidget()
         if parent is not None:

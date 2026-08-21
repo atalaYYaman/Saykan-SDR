@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QSizePolicy
 from sdr_console.dsp.axis import band_edges_hz, frequency_axis_hz
 from sdr_console.dsp.frame import SpectrumFrame
 from sdr_console.viz.interaction import frequency_at_scene_pos
+from sdr_console.viz.plot_theme import apply_plot_chrome
 from sdr_console.viz.settings import DisplaySettings
 
 
@@ -58,11 +59,11 @@ class SpectrumWidget(pg.PlotWidget):
         self._x = frequency_axis_hz(self._center_freq_hz, self._sample_rate_hz, fft_size)
 
         _prepare_fill_plot(self)
+        apply_plot_chrome(self, self._settings)
         plot_item = self.getPlotItem()
         plot_item.setLabel("left", "Power (dBFS)")
         plot_item.getAxis("left").setWidth(self._settings.axis_label_width)
         plot_item.getAxis("bottom").setStyle(showValues=False)
-        plot_item.showGrid(x=True, y=True, alpha=0.25)
         plot_item.setMouseEnabled(x=True, y=False)
         plot_item.disableAutoRange()
         plot_item.setYRange(self._settings.vmin_db, self._settings.vmax_db, padding=0)
@@ -70,7 +71,7 @@ class SpectrumWidget(pg.PlotWidget):
         self._curve = plot_item.plot(
             self._x,
             np.full(fft_size, self._settings.vmin_db, dtype=np.float64),
-            pen=pg.mkPen(color="#ffcc00", width=1),
+            pen=pg.mkPen(color=self._settings.spectrum_pen_color, width=1),
         )
         self.reset_view()
 
@@ -90,8 +91,10 @@ class SpectrumWidget(pg.PlotWidget):
 
     def set_display_settings(self, settings: DisplaySettings) -> None:
         self._settings = settings
+        apply_plot_chrome(self, settings)
         self.getPlotItem().getAxis("left").setWidth(settings.axis_label_width)
         self.setYRange(settings.vmin_db, settings.vmax_db, padding=0)
+        self._curve.setPen(pg.mkPen(color=settings.spectrum_pen_color, width=1))
 
     def set_tuning(self, center_freq_hz: float, sample_rate_hz: float) -> bool:
         """Rebuild the frequency axis for new receiver tuning.

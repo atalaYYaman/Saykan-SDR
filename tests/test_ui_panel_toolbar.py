@@ -60,3 +60,15 @@ def test_checkbox_stays_in_sync_with_panel(shown_window: MainWindow) -> None:
     action.trigger()
     assert checkbox.isChecked()
     assert shown_window._detection_panel.isVisible()
+
+
+def test_now_tabs_start_checked_to_match_open_panels(shown_window: MainWindow) -> None:
+    toolbar = shown_window._panel_toolbar
+    assert toolbar.checkbox_for("dock_detection").isChecked()
+    assert toolbar.checkbox_for("dock_scan").isChecked()
+    assert toolbar.checkbox_for("dock_tx").isChecked()
+    assert not toolbar.checkbox_for("dock_df").isChecked()
+    assert not toolbar.checkbox_for("dock_ea_jam").isChecked()
+    assert shown_window._detection_panel.isVisible()
+    assert shown_window._scan_panel.isVisible()
+    assert shown_window._tx_panel.isVisible()

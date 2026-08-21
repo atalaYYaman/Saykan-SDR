@@ -61,6 +61,7 @@ class PanelToolBar(QWidget):
 
         root.addLayout(ed_row)
         root.addWidget(et_host)
+        self.sync_from_host()
 
     def _fill_row(self, row: QHBoxLayout, names: tuple[str, ...]) -> None:
         host = self._host
@@ -83,6 +84,7 @@ class PanelToolBar(QWidget):
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
             button.setAutoRaise(True)
             self._bind_button(button, action)
+            button.setChecked(action.isChecked())
             self._buttons[name] = button
             self._actions[name] = action
             row.addWidget(button)
@@ -97,6 +99,20 @@ class PanelToolBar(QWidget):
 
     def toggle_action_for(self, name: str) -> QAction:
         return self._actions[name]
+
+    def sync_from_host(self) -> None:
+        """Match tab checked state to actually visible panels (no extra toggles)."""
+        for name, action in self._actions.items():
+            wanted = self._host.is_panel_visible(name)
+            if action.isChecked() != wanted:
+                action.blockSignals(True)
+                action.setChecked(wanted)
+                action.blockSignals(False)
+            button = self._buttons[name]
+            if button.isChecked() != wanted:
+                button.blockSignals(True)
+                button.setChecked(wanted)
+                button.blockSignals(False)
 
     def _make_action_handler(self, name: str):
         def _on(checked: bool) -> None:
