@@ -16,6 +16,8 @@ Ana pencere, Start/Stop, cihaz seçimi, frekans/kazanç/sample rate kontrolleri.
   Start, Stop ve ED/ET/GNSS/saat rozetleri.
 - Sağ host — `FeaturePanelHost` üstünde ED/ET sekme şeridi; NOW paneller
   (Tespit/Tarama/TX) açık, SHELL paneller empty-state ve varsayılan gizli.
+- Tespit tablosu — NOW kolonlar + gizli SHELL kolon yuvaları (`—`);
+  sağ tık: Dinle / Locate (disabled) / Assign ET (disabled).
 
 **Bağımlılık yönü:** ui → viz, pipeline, hal, config, demod (factory). DSP'ye
 doğrudan erişim yasak.

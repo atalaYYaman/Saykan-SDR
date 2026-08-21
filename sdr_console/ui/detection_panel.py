@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QHeaderView,
     QLabel,
+    QMenu,
     QPushButton,
     QSizePolicy,
     QStackedWidget,
@@ -26,19 +27,60 @@ from sdr_console.detect.identified import IdentifiedPeak
 from sdr_console.detect.peaks import (
     DEFAULT_MERGE_BANDWIDTH_HZ,
     MAX_MERGE_DISTANCE_HZ,
-    MERGE_DISTANCE_PRESETS_HZ,
     MIN_MERGE_DISTANCE_HZ,
 )
+from sdr_console.ui.theme.tokens import COLOR_DETECT_ACCENT, COLOR_TEXT_DISABLED
 
 DEFAULT_DETECTION_THRESHOLD_DB = -40.0
 DEFAULT_DETECTION_MERGE_BANDWIDTH_HZ = DEFAULT_MERGE_BANDWIDTH_HZ
 
 _FREQUENCY_ROLE = Qt.ItemDataRole.UserRole
+_BANDWIDTH_ROLE = Qt.ItemDataRole.UserRole + 2
 _SORT_ROLE = Qt.ItemDataRole.UserRole + 1
 
 _EMPTY_PLACEHOLDER_TEXT = "Henüz sinyal tespit edilmedi"
 _POPOUT_PLACEHOLDER_TEXT = "Liste ayrı pencerede açık"
-_FREQUENCY_LINK_COLOR = QColor(42, 130, 218)
+_FREQUENCY_LINK_COLOR = QColor(COLOR_DETECT_ACCENT)
+_SHELL_PLACEHOLDER = "—"
+_SHELL_TOOLTIP = "SHELL — bağlı değil"
+
+# MASTER §4.3 — NOW then reserved SHELL columns (hidden).
+COL_FREQUENCY = 0
+COL_BANDWIDTH = 1
+COL_POWER = 2
+COL_GAIN = 3
+COL_COUNT = 4
+COL_ANALOG_DIGITAL = 5
+COL_MOD = 6
+COL_PROTOCOL = 7
+COL_MULTIPLEX = 8
+COL_EKKT = 9
+COL_CONFIDENCE = 10
+COL_TOA = 11
+DETECTION_COLUMN_COUNT = 12
+SHELL_COLUMN_INDEXES: tuple[int, ...] = (
+    COL_ANALOG_DIGITAL,
+    COL_MOD,
+    COL_PROTOCOL,
+    COL_MULTIPLEX,
+    COL_EKKT,
+    COL_CONFIDENCE,
+    COL_TOA,
+)
+DETECTION_HEADERS: tuple[str, ...] = (
+    "Frekans (MHz)",
+    "BW",
+    "Güç (dB)",
+    "Gain (dB)",
+    "Tekrar",
+    "A/D",
+    "Mod",
+    "Protokol",
+    "Çoklama",
+    "EKKT",
+    "Güven",
+    "TOA",
+)
 
 
 def _peaks_snapshot(peaks: list[IdentifiedPeak]) -> tuple[tuple[float, float, float, int], ...]:
@@ -67,6 +109,15 @@ class _SortableTableItem(QTableWidgetItem):
         return super().__lt__(other)
 
 
+def _shell_cell() -> _SortableTableItem:
+    item = _SortableTableItem(_SHELL_PLACEHOLDER)
+    item.setData(_SORT_ROLE, "")
+    item.setForeground(QColor(COLOR_TEXT_DISABLED))
+    item.setToolTip(_SHELL_TOOLTIP)
+    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    return item
+
+
 class DetectionPanel(QGroupBox):
     """Detection toggle, threshold control, and confirmed-signal table."""
 
@@ -74,6 +125,7 @@ class DetectionPanel(QGroupBox):
     threshold_changed = pyqtSignal(float)
     merge_bandwidth_changed = pyqtSignal(float)
     frequency_selected = pyqtSignal(float)
+    row_selected = pyqtSignal(float, float)
     clear_all_requested = pyqtSignal()
     remove_selected_requested = pyqtSignal(list)
 
@@ -134,7 +186,8 @@ class DetectionPanel(QGroupBox):
         merge_label.setToolTip(self._merge_bandwidth_spin.toolTip())
 
         self._controls_hint = QLabel(
-            "Eşik: aday sinyal gücü · Birleştirme mesafesi: aynı yayının yan loblarını tek satırda toplar"
+            "Eşik: aday sinyal gücü · Birleştirme mesafesi: "
+            "aynı yayının yan loblarını tek satırda toplar"
         )
         self._controls_hint.setWordWrap(True)
         self._controls_hint.setStyleSheet("color: palette(mid);")
@@ -151,24 +204,27 @@ class DetectionPanel(QGroupBox):
         controls.addRow(threshold_label, self._threshold_spin)
         controls.addRow(merge_label, self._merge_bandwidth_spin)
 
-        self._table = QTableWidget(0, 4)
-        self._table.setHorizontalHeaderLabels(
-            ["Frekans (MHz)", "Güç (dB)", "Gain (dB)", "Tekrar Sayısı"]
-        )
+        self._table = QTableWidget(0, DETECTION_COLUMN_COUNT)
+        self._table.setObjectName("detection_table")
+        self._table.setHorizontalHeaderLabels(list(DETECTION_HEADERS))
         self._table.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
         header = self._table.horizontalHeader()
         header.setSectionsMovable(False)
-        header.setStretchLastSection(True)
+        header.setStretchLastSection(False)
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(COL_FREQUENCY, QHeaderView.ResizeMode.Stretch)
+        for column in SHELL_COLUMN_INDEXES:
+            self._table.setColumnHidden(column, True)
         self._table.verticalHeader().setVisible(False)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self._table.setAlternatingRowColors(True)
         self._table.setSortingEnabled(False)
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
         self._placeholder = QLabel(_EMPTY_PLACEHOLDER_TEXT)
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -254,6 +310,8 @@ class DetectionPanel(QGroupBox):
         self._remove_selected_button.clicked.connect(self._emit_remove_selected)
         self._popout_button.clicked.connect(self._toggle_popout)
         self._table.cellClicked.connect(self._on_frequency_cell_clicked)
+        self._table.customContextMenuRequested.connect(self._on_table_context_menu)
+        self._table.itemSelectionChanged.connect(self._emit_row_selection)
         self._refresh_table_view()
 
     def is_detection_enabled(self) -> bool:
@@ -283,7 +341,7 @@ class DetectionPanel(QGroupBox):
         rows = {index.row() for index in self._table.selectedIndexes()}
         frequencies_hz: list[float] = []
         for row in sorted(rows):
-            item = self._table.item(row, 0)
+            item = self._table.item(row, COL_FREQUENCY)
             if item is None:
                 continue
             frequency_hz = item.data(_FREQUENCY_ROLE)
@@ -305,7 +363,16 @@ class DetectionPanel(QGroupBox):
             freq_item.setData(_FREQUENCY_ROLE, peak.frequency_hz)
             freq_item.setData(_SORT_ROLE, float(peak.frequency_hz))
             freq_item.setForeground(_FREQUENCY_LINK_COLOR)
-            freq_item.setToolTip("Bu frekansa git")
+            freq_item.setToolTip("Bu frekansa git (Dinle)")
+
+            bw_item = _SortableTableItem(_SHELL_PLACEHOLDER)
+            bw_item.setData(_SORT_ROLE, 0.0)
+            bw_item.setData(_BANDWIDTH_ROLE, 0.0)
+            bw_item.setToolTip("BW henüz ölçülmedi")
+            bw_item.setForeground(QColor(COLOR_TEXT_DISABLED))
+            bw_item.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
 
             power_item = _SortableTableItem(f"{peak.power_db:.1f}")
             power_item.setData(_SORT_ROLE, float(peak.power_db))
@@ -320,10 +387,13 @@ class DetectionPanel(QGroupBox):
                 numeric_item.setTextAlignment(
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                 )
-            self._table.setItem(row, 0, freq_item)
-            self._table.setItem(row, 1, power_item)
-            self._table.setItem(row, 2, gain_item)
-            self._table.setItem(row, 3, count_item)
+            self._table.setItem(row, COL_FREQUENCY, freq_item)
+            self._table.setItem(row, COL_BANDWIDTH, bw_item)
+            self._table.setItem(row, COL_POWER, power_item)
+            self._table.setItem(row, COL_GAIN, gain_item)
+            self._table.setItem(row, COL_COUNT, count_item)
+            for column in SHELL_COLUMN_INDEXES:
+                self._table.setItem(row, column, _shell_cell())
 
         self._peak_count = len(peaks)
         if peaks and not self._columns_auto_sized:
@@ -338,15 +408,55 @@ class DetectionPanel(QGroupBox):
         self._refresh_table_view()
 
     def _on_frequency_cell_clicked(self, row: int, column: int) -> None:
-        if column != 0:
+        if column != COL_FREQUENCY:
             return
-        item = self._table.item(row, 0)
+        item = self._table.item(row, COL_FREQUENCY)
         if item is None:
             return
         frequency_hz = item.data(_FREQUENCY_ROLE)
         if frequency_hz is None:
             return
         self.frequency_selected.emit(float(frequency_hz))
+
+    def _emit_row_selection(self) -> None:
+        row = self._table.currentRow()
+        if row < 0 or self._table.item(row, COL_FREQUENCY) is None:
+            self.row_selected.emit(0.0, 0.0)
+            return
+        freq_item = self._table.item(row, COL_FREQUENCY)
+        bw_item = self._table.item(row, COL_BANDWIDTH)
+        frequency_hz = float(freq_item.data(_FREQUENCY_ROLE) or 0.0)
+        bandwidth_hz = 0.0
+        if bw_item is not None:
+            stored = bw_item.data(_BANDWIDTH_ROLE)
+            if stored is not None:
+                bandwidth_hz = float(stored)
+        self.row_selected.emit(frequency_hz, bandwidth_hz)
+
+    def _on_table_context_menu(self, pos) -> None:
+        row = self._table.rowAt(pos.y())
+        if row < 0:
+            return
+        menu = self._row_context_menu()
+        chosen = menu.exec(self._table.viewport().mapToGlobal(pos))
+        if chosen is not None and chosen.text() == "Dinle":
+            item = self._table.item(row, COL_FREQUENCY)
+            if item is None:
+                return
+            frequency_hz = item.data(_FREQUENCY_ROLE)
+            if frequency_hz is not None:
+                self.frequency_selected.emit(float(frequency_hz))
+
+    def _row_context_menu(self) -> QMenu:
+        menu = QMenu(self)
+        menu.addAction("Dinle")
+        locate = menu.addAction("Locate")
+        locate.setEnabled(False)
+        locate.setToolTip("DF bağlı değil")
+        assign = menu.addAction("Assign ET")
+        assign.setEnabled(False)
+        assign.setToolTip("ET atama bağlı değil")
+        return menu
 
     def _emit_remove_selected(self) -> None:
         frequencies_hz = self.selected_frequencies_hz()

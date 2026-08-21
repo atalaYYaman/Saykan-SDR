@@ -47,3 +47,35 @@ def test_opening_df_tab_shows_empty_state_not_fake_bearing(
     assert combos
     assert all(not combo.isEnabled() for combo in combos)
     assert all(not field.isEnabled() for field in window._df_panel.findChildren(QLineEdit))
+
+
+def test_detection_row_updates_params_vfo_without_fake_mod(
+    window: MainWindow, qtbot
+) -> None:
+    from sdr_console.detect.identified import IdentifiedPeak
+
+    window.show()
+    qtbot.waitExposed(window)
+    window._panel_toolbar.toggle_action_for("dock_params").trigger()
+    qtbot.waitUntil(lambda: window._params_panel.isVisible(), timeout=2000)
+    assert window._params_panel.empty_text() == "Tespit seçin"
+    assert window._params_panel.vfo_text() == "—"
+
+    window._detection_panel.update_peaks(
+        [
+            IdentifiedPeak(
+                name="A",
+                frequency_hz=97_000_000.0,
+                power_db=-20.0,
+                capture_gain_db=20.0,
+                detection_count=1,
+            )
+        ]
+    )
+    window._detection_panel._table.selectRow(0)
+    assert "97.000" in window._params_panel.vfo_text()
+    assert window._params_panel.bw_text() == "—"
+    extra = window._params_panel.findChild(QLineEdit, "params_shell_extra")
+    assert extra is not None
+    assert extra.text() == "—"
+    assert not extra.isEnabled()

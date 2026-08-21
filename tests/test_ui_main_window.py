@@ -578,9 +578,10 @@ def test_detection_panel_frequency_cell_tunes_channel(window: MainWindow, qtbot)
     )
 
     assert window._detection_panel._table.item(0, 0).text() == "97.000"
-    assert window._detection_panel._table.item(0, 1).text() == "-20.0"
-    assert window._detection_panel._table.item(0, 2).text() == "25.0"
-    assert window._detection_panel._table.item(0, 3).text() == "4"
+    assert window._detection_panel._table.item(0, 1).text() == "—"
+    assert window._detection_panel._table.item(0, 2).text() == "-20.0"
+    assert window._detection_panel._table.item(0, 3).text() == "25.0"
+    assert window._detection_panel._table.item(0, 4).text() == "4"
 
     window._detection_panel._table.cellClicked.emit(0, 0)
     assert window._config.center_freq_hz == pytest.approx(97_000_000.0)

@@ -793,6 +793,7 @@ class MainWindow(QMainWindow):
             self._on_detection_remove_selected
         )
         self._detection_panel.frequency_selected.connect(self._on_detection_frequency_selected)
+        self._detection_panel.row_selected.connect(self._on_detection_row_selected)
         self._scan_panel.start_requested.connect(self._on_scan_start_requested)
         self._scan_panel.stop_requested.connect(self._on_scan_stop_requested)
         self._tx_panel.oneshot_requested.connect(self._on_tx_oneshot_requested)
@@ -1245,6 +1246,13 @@ class MainWindow(QMainWindow):
     def _on_detection_frequency_selected(self, freq_hz: float) -> None:
         """Tune the receiver and VFO to a detected signal frequency."""
         self._retune_to_frequency(freq_hz)
+
+    def _on_detection_row_selected(self, freq_hz: float, bandwidth_hz: float) -> None:
+        """NOW inspector: VFO + BW from the selected detection row."""
+        if freq_hz <= 0.0:
+            self._params_panel.set_selection(None)
+            return
+        self._params_panel.set_selection(freq_hz, bandwidth_hz)
 
     def _retune_to_frequency(self, freq_hz: float) -> None:
         """Move device center and listening VFO to an absolute RF frequency."""

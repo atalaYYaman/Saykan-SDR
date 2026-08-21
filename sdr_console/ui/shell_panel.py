@@ -53,6 +53,9 @@ class ShellPanel(QGroupBox):
     def empty_text(self) -> str:
         return self._empty.text()
 
+    def set_empty_text(self, text: str) -> None:
+        self._empty.setText(text)
+
 
 def create_df_shell() -> ShellPanel:
     panel = ShellPanel("Yön Bulma", "DF bağlı değil")
@@ -89,21 +92,57 @@ def create_geoloc_shell() -> ShellPanel:
     return panel
 
 
-def create_params_shell() -> ShellPanel:
-    panel = ShellPanel("Parametre", "Tespit seçin")
-    vfo = QLineEdit("—")
-    bw = QLineEdit("—")
-    extra = QLineEdit("—")
-    form = QFormLayout()
-    form.addRow("VFO", vfo)
-    form.addRow("BW", bw)
-    form.addRow("Mod / protokol / EKKT", extra)
-    _disabled(vfo, bw, extra)
-    holder = QWidget()
-    holder.setLayout(form)
-    panel.body_layout().addWidget(holder)
-    panel.body_layout().addStretch()
-    return panel
+class ParamsShellPanel(ShellPanel):
+    """Inspector for a selected detection: NOW VFO/BW, SHELL fields stay '—'."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__("Parametre", "Tespit seçin", parent)
+        self._vfo = QLineEdit("—")
+        self._vfo.setObjectName("params_vfo")
+        self._vfo.setReadOnly(True)
+        self._bw = QLineEdit("—")
+        self._bw.setObjectName("params_bw")
+        self._bw.setReadOnly(True)
+        extra = QLineEdit("—")
+        extra.setObjectName("params_shell_extra")
+        extra.setReadOnly(True)
+        extra.setEnabled(False)
+        extra.setToolTip("Mod / protokol / EKKT — SHELL, bağlı değil")
+        form = QFormLayout()
+        form.addRow("VFO", self._vfo)
+        form.addRow("BW", self._bw)
+        form.addRow("Mod / protokol / EKKT", extra)
+        holder = QWidget()
+        holder.setLayout(form)
+        self.body_layout().addWidget(holder)
+        self.body_layout().addStretch()
+
+    def set_selection(
+        self,
+        frequency_hz: float | None,
+        bandwidth_hz: float = 0.0,
+    ) -> None:
+        if frequency_hz is None or frequency_hz <= 0.0:
+            self.set_empty_text("Tespit seçin")
+            self._vfo.setText("—")
+            self._bw.setText("—")
+            return
+        self.set_empty_text("Seçili tespit")
+        self._vfo.setText(f"{frequency_hz / 1_000_000.0:.6f} MHz")
+        if bandwidth_hz > 0.0:
+            self._bw.setText(f"{bandwidth_hz / 1_000.0:.1f} kHz")
+        else:
+            self._bw.setText("—")
+
+    def vfo_text(self) -> str:
+        return self._vfo.text()
+
+    def bw_text(self) -> str:
+        return self._bw.text()
+
+
+def create_params_shell() -> ParamsShellPanel:
+    return ParamsShellPanel()
 
 
 def create_ea_jam_shell() -> ShellPanel:
