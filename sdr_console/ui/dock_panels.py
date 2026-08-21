@@ -1,8 +1,8 @@
 """QDockWidget yardımcıları — özellik panelleri için ortak oluşturma.
 
 Yerleşim notları:
-- Üst: Receiver / Audio / Display yan yana; Tespit/Tarama/TX toggle'ları HoverDrawer.
-- Alt sol: spektrum + yatay waterfall. Sağ: Tespit/Tarama/TX.
+- Üst: Receiver / Audio / Display yan yana.
+- Sağ: FeaturePanelHost ED/ET sekmeleri (NOW + SHELL).
 - Tüm özellik panelleri kapatıldığında spektrum/waterfall alanı genişler.
 """
 

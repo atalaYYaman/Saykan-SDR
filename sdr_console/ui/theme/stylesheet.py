@@ -17,13 +17,51 @@ QMainWindow, QDialog, QMessageBox {{
 QLabel {{
   color: {t.COLOR_TEXT_PRIMARY};
 }}
-QWidget#toolbar_main {{
+QToolBar#toolbar_main {{
   background-color: {t.COLOR_BG_PANEL};
+  border: none;
   border-bottom: 1px solid {t.COLOR_BORDER};
+  spacing: {t.SPACE_2_PX}px;
+  padding: {t.SPACE_1_PX}px {t.SPACE_3_PX}px;
+}}
+QToolBar#toolbar_main QLabel {{
+  color: {t.COLOR_TEXT_PRIMARY};
+}}
+QLabel#badge_ed_subsystem[state="online"] {{
+  color: {t.COLOR_ED_ACCENT};
+  font-weight: 600;
+}}
+QLabel#badge_ed_subsystem[state="offline"],
+QLabel#badge_et_subsystem[state="standby"],
+QLabel#badge_gnss,
+QLabel#label_mission_time {{
+  color: {t.COLOR_TEXT_DISABLED};
+  font-family: {t.FONT_MONO};
+  font-size: {t.FONT_CAPTION_PX}px;
+}}
+QLabel#badge_et_subsystem[state="armed"],
+QLabel#badge_et_subsystem[state="active"] {{
+  color: {t.COLOR_ET_ACCENT};
+  font-weight: 600;
+  font-family: {t.FONT_MONO};
+  font-size: {t.FONT_CAPTION_PX}px;
+}}
+QLabel#badge_ed_subsystem {{
+  font-family: {t.FONT_MONO};
+  font-size: {t.FONT_CAPTION_PX}px;
 }}
 QWidget#feature_host {{
   background-color: {t.COLOR_BG_PANEL};
   border-left: 1px solid {t.COLOR_BORDER};
+}}
+QScrollArea#feature_host_scroll {{
+  background-color: {t.COLOR_BG_PANEL};
+  border: none;
+}}
+QLabel#feature_host_empty {{
+  color: {t.COLOR_TEXT_DISABLED};
+  font-size: {t.FONT_CAPTION_PX}px;
+  padding: {t.SPACE_3_PX}px;
 }}
 QWidget#dock_left_controls,
 QWidget#controls_column {{
@@ -139,6 +177,18 @@ QSlider::handle:horizontal {{
   margin: -5px 0;
   border-radius: 7px;
 }}
+QToolButton#collapsible_header {{
+  color: {t.COLOR_TEXT_PRIMARY};
+  background-color: transparent;
+  border: none;
+  font-size: {t.FONT_SECTION_PX}px;
+  font-weight: 600;
+  padding: 2px 4px;
+  text-align: left;
+}}
+QToolButton#collapsible_header:checked {{
+  color: {t.COLOR_ED_ACCENT};
+}}
 QGroupBox, CollapsibleGroupBox {{
   background-color: {t.COLOR_BG_PANEL};
   border: 1px solid {t.COLOR_BORDER};
@@ -208,7 +258,52 @@ QMenu {{
 QMenu::item:selected {{
   background-color: {t.CYAN_900};
 }}
+QWidget#panel_toolbar {{
+  background-color: {t.COLOR_BG_PANEL};
+}}
+QWidget#panel_toolbar QToolButton {{
+  color: {t.COLOR_TEXT_SECONDARY};
+  background-color: transparent;
+  border: 1px solid transparent;
+  border-radius: {t.RADIUS_MD_PX}px;
+  padding: 3px {t.SPACE_2_PX}px;
+  font-size: {t.FONT_CAPTION_PX}px;
+}}
+QWidget#panel_toolbar QToolButton:checked {{
+  color: {t.COLOR_ED_ACCENT};
+  background-color: {t.CYAN_900};
+  border: 1px solid {t.COLOR_ED_ACCENT};
+}}
+QWidget#group_et_host {{
+  background-color: {t.COLOR_BG_PANEL};
+}}
+QWidget#group_et_host QToolButton:checked {{
+  color: {t.COLOR_ET_ACCENT};
+  background-color: {t.RED_900};
+  border: 1px solid {t.COLOR_ET_ACCENT};
+}}
+QLabel#panel_toolbar_ed_label {{
+  color: {t.COLOR_ED_ACCENT};
+  font-weight: 600;
+  font-size: {t.FONT_CAPTION_PX}px;
+}}
+QLabel#panel_toolbar_et_label {{
+  color: {t.COLOR_ET_ACCENT};
+  font-weight: 600;
+  font-size: {t.FONT_CAPTION_PX}px;
+}}
+QGroupBox[shell="true"],
 QWidget[shell="true"] {{
   color: {t.COLOR_TEXT_DISABLED};
+}}
+QLabel#shell_empty_label {{
+  color: {t.COLOR_TEXT_DISABLED};
+  font-size: {t.FONT_CAPTION_PX}px;
+}}
+QLabel#shell_map_slot {{
+  color: {t.COLOR_TEXT_DISABLED};
+  border: 1px dashed {t.COLOR_BORDER};
+  border-radius: {t.RADIUS_MD_PX}px;
+  min-height: 80px;
 }}
 """.strip()

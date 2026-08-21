@@ -1,23 +1,39 @@
-"""Sağ özellik panelleri — açık olanlar dikey splitter ile aynı anda görünür."""
+"""Sağ özellik panelleri — ED/ET sekme şeridi her zaman görünür kalır."""
 
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QSizePolicy, QSplitter, QVBoxLayout, QWidget
+from PyQt6.QtGui import QShowEvent
+from PyQt6.QtWidgets import (
+    QFrame,
+    QLabel,
+    QScrollArea,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
+
+from sdr_console.ui.panel_toolbar import PanelToolBar
 
 FEATURE_HOST_MIN_WIDTH_PX = 300
 FEATURE_HOST_MAX_WIDTH_PX = 440
+FEATURE_PANEL_MIN_HEIGHT_PX = 180
 _QWIDGETSIZE_MAX = 16777215
+
+PanelSpec = tuple[str, QWidget] | tuple[str, QWidget, bool]
 
 
 class FeaturePanelHost(QWidget):
-    """Tespit / Tarama / TX panellerini dikey böler; gizli olanlar yer kaplamaz."""
+    """ED/ET sekme şeridi + kaydırılabilir açık paneller.
+
+    İçerik panelleri kapanınca host gizlenmez; sekmelerden yeniden açılır.
+    """
 
     visibility_changed = pyqtSignal()
 
     def __init__(
         self,
-        panels: list[tuple[str, QWidget]],
+        panels: list[PanelSpec],
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -28,11 +44,19 @@ class FeaturePanelHost(QWidget):
 
         self._panels: dict[str, QWidget] = {}
         self._wanted: dict[str, bool] = {}
-        self._splitter = QSplitter(Qt.Orientation.Vertical, self)
-        self._splitter.setChildrenCollapsible(True)
-        self._splitter.setHandleWidth(8)
 
-        for name, widget in panels:
+        self._body = QWidget()
+        self._body.setObjectName("feature_host_body")
+        self._body.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        self._column = QVBoxLayout(self._body)
+        self._column.setContentsMargins(0, 0, 0, 0)
+        self._column.setSpacing(8)
+
+        for spec in panels:
+            name, widget, default_visible = _parse_panel_spec(spec)
             widget.setObjectName(name)
             widget.setMinimumWidth(0)
             widget.setMaximumWidth(_QWIDGETSIZE_MAX)
@@ -41,19 +65,38 @@ class FeaturePanelHost(QWidget):
                 QSizePolicy.Policy.Expanding,
             )
             self._panels[name] = widget
-            self._wanted[name] = True
-            self._splitter.addWidget(widget)
+            self._wanted[name] = default_visible
+            self._column.addWidget(widget, stretch=1)
 
+        self._scroll = QScrollArea()
+        self._scroll.setObjectName("feature_host_scroll")
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setWidget(self._body)
+
+        self._empty = QLabel("Bir ED veya ET paneli seçin")
+        self._empty.setObjectName("feature_host_empty")
+        self._empty.setWordWrap(True)
+        self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+
+        self._tab_bar = PanelToolBar(self)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 0, 4, 0)
         layout.setSpacing(0)
-        layout.addWidget(self._splitter)
+        layout.addWidget(self._tab_bar)
+        layout.addWidget(self._empty, stretch=1)
+        layout.addWidget(self._scroll, stretch=1)
 
         self.equalize()
 
     @property
-    def splitter(self) -> QSplitter:
-        return self._splitter
+    def tab_bar(self) -> PanelToolBar:
+        return self._tab_bar
 
     def panel_names(self) -> list[str]:
         return list(self._panels.keys())
@@ -69,31 +112,47 @@ class FeaturePanelHost(QWidget):
         if self._wanted[name] == visible:
             return
         self._wanted[name] = visible
-        widget = self._panels[name]
-        widget.setVisible(visible)
-        if visible:
-            widget.setMinimumHeight(0)
-            widget.setMaximumHeight(_QWIDGETSIZE_MAX)
-        else:
-            widget.setMinimumHeight(0)
-            widget.setMaximumHeight(0)
         self.equalize()
         self.visibility_changed.emit()
 
-    def equalize(self) -> None:
-        """Açık paneller yüksekliği eşit paylaşsın; hiçbiri yoksa host gizlensin."""
-        any_visible = any(self._wanted.values())
-        if not any_visible:
-            self.setMinimumWidth(0)
-            self.setMaximumWidth(0)
-            self.setVisible(False)
-            return
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self.equalize()
 
+    def equalize(self) -> None:
+        """Açık panelleri göster; hiçbiri yoksa boş durum + sekmeler kalsın."""
         self.setMinimumWidth(FEATURE_HOST_MIN_WIDTH_PX)
         self.setMaximumWidth(FEATURE_HOST_MAX_WIDTH_PX)
         self.setVisible(True)
-        sizes = [1000 if self._wanted[name] else 0 for name in self._panels]
-        self._splitter.setSizes(sizes)
+
+        visible_names = [name for name, wanted in self._wanted.items() if wanted]
+        self._empty.setVisible(not visible_names)
+        self._scroll.setVisible(bool(visible_names))
+
+        min_total = 0
+        for name, widget in self._panels.items():
+            wanted = self._wanted[name]
+            widget.setVisible(wanted)
+            stretch = 1 if wanted else 0
+            index = self._column.indexOf(widget)
+            if index >= 0:
+                self._column.setStretch(index, stretch)
+            if not wanted:
+                widget.setMinimumHeight(0)
+                widget.setMaximumHeight(0)
+                continue
+            widget.setMaximumHeight(_QWIDGETSIZE_MAX)
+            if len(visible_names) == 1:
+                viewport_h = self._scroll.viewport().height()
+                widget.setMinimumHeight(
+                    viewport_h if viewport_h > 0 else 0
+                )
+            else:
+                hint = max(widget.minimumSizeHint().height(), FEATURE_PANEL_MIN_HEIGHT_PX)
+                widget.setMinimumHeight(hint)
+                min_total += hint
+
+        self._body.setMinimumHeight(min_total)
         self.updateGeometry()
         parent = self.parentWidget()
         if parent is not None:
@@ -101,3 +160,11 @@ class FeaturePanelHost(QWidget):
             layout = parent.layout()
             if layout is not None:
                 layout.activate()
+
+
+def _parse_panel_spec(spec: PanelSpec) -> tuple[str, QWidget, bool]:
+    if len(spec) == 3:
+        name, widget, default_visible = spec
+        return name, widget, bool(default_visible)
+    name, widget = spec
+    return name, widget, True

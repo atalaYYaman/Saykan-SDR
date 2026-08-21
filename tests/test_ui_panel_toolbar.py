@@ -1,4 +1,4 @@
-"""Panel toolbar toggle testleri — HoverDrawer içindeki kutular."""
+"""Panel toolbar toggle testleri — sağ host üzerindeki ED/ET sekmeleri."""
 
 from __future__ import annotations
 
@@ -33,6 +33,8 @@ def test_panel_toolbar_has_toggle_for_each_dock(shown_window: MainWindow) -> Non
     assert "Tespit" in texts
     assert "Tarama" in texts
     assert "TX" in texts
+    assert "DF" in texts
+    assert "Karıştırma" in texts
     assert "RX" not in texts
     assert "Audio" not in texts
 

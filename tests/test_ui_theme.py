@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from PyQt6.QtGui import QPalette
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QToolBar, QWidget
 
 from sdr_console.config.app_config import AppConfig
 from sdr_console.ui.main_window import MainWindow
@@ -62,6 +62,18 @@ def test_main_window_object_names_match_master(window: MainWindow) -> None:
     assert window._controls_column.objectName() == "dock_left_controls"
     assert window._display.objectName() == "display_center"
     assert window._feature_host.objectName() == "feature_host"
+    assert window._detection_panel.objectName() == "dock_detection"
+    assert window._scan_panel.objectName() == "dock_scan"
+    assert window._tx_panel.objectName() == "dock_tx"
+    assert window._df_panel.objectName() == "dock_df"
+    assert window._geoloc_panel.objectName() == "dock_geoloc"
+    assert window._params_panel.objectName() == "dock_params"
+    assert window._ea_jam_panel.objectName() == "dock_ea_jam"
+    assert window._ea_deceive_panel.objectName() == "dock_ea_deceive"
+    assert window._ea_gnss_panel.objectName() == "dock_ea_gnss"
+    assert window._panel_toolbar.objectName() == "panel_toolbar"
+    assert window.findChild(QWidget, "group_et_host") is not None
     assert window._status_label.objectName() == "status_bar"
-    assert window._start_button.parentWidget() is not None
-    assert window._start_button.parentWidget().objectName() == "toolbar_main"
+    toolbar = window.findChild(QToolBar, "toolbar_main")
+    assert toolbar is not None
+    assert window._start_button.objectName() == "transport_start"

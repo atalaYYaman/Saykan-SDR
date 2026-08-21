@@ -657,39 +657,65 @@ def test_feature_docks_are_visible_by_default(window: MainWindow, qtbot) -> None
     assert window._scan_panel.title() == "Tarama Modu"
     assert window._tx_panel.title() == "TX / Test"
     assert window._feature_host.isVisible()
-    assert not window._hover_drawer.is_expanded()
+    assert not window._df_panel.isVisible()
+    assert not window._ea_jam_panel.isVisible()
 
 
 def test_control_docks_stack_on_left_and_feature_docks_on_right(
     window: MainWindow,
 ) -> None:
-    assert window._hover_drawer.parentWidget() is not None
     assert window._controls_scroll.parentWidget() is window._main_column
     assert window._display.parentWidget() is window._main_column
     assert window._receiver_box.parentWidget() is window._controls_column
     assert window._audio_box.parentWidget() is window._controls_column
     assert window._display_box.parentWidget() is window._controls_column
     assert window._feature_host.parentWidget() is not None
+    assert window._panel_toolbar.parentWidget() is window._feature_host
 
 
 def test_collapsing_control_panels_frees_vertical_space(window: MainWindow, qtbot) -> None:
     window.resize(1100, 800)
     window.show()
     qtbot.waitExposed(window)
+    window._audio_box.set_expanded(True)
+    window._display_box.set_expanded(True)
     window._sync_main_splitter_to_controls()
 
     height_before = window._display.height()
 
-    window._receiver_box.set_expanded(False)
     window._audio_box.set_expanded(False)
     window._display_box.set_expanded(False)
     window._on_control_panel_toggled(False)
     qtbot.waitUntil(lambda: window._display.height() >= height_before, timeout=2000)
-    assert not window._receiver_box.content_widget().isVisible()
+    assert window._receiver_box.is_expanded()
+    assert not window._audio_box.content_widget().isVisible()
+    assert not window._display_box.content_widget().isVisible()
+
+
+def test_only_receiver_starts_expanded(window: MainWindow, qtbot) -> None:
+    window.show()
+    qtbot.waitExposed(window)
+    assert window._receiver_box.is_expanded()
+    assert window._receiver_box.header_button().isChecked()
+    assert not window._audio_box.is_expanded()
+    assert not window._audio_box.header_button().isChecked()
+    assert not window._display_box.is_expanded()
+    assert not window._display_box.header_button().isChecked()
+
+
+def test_last_control_panel_cannot_collapse(window: MainWindow, qtbot) -> None:
+    window.show()
+    qtbot.waitExposed(window)
+    assert window._receiver_box.is_expanded()
+    window._receiver_box.set_expanded(False)
+    assert window._receiver_box.is_expanded()
+    assert window._receiver_box.header_button().isChecked()
+    assert window._receiver_box.content_widget().isVisible()
 
 
 def test_abbreviation_and_status_clarity(window: MainWindow) -> None:
-    assert "RF Bandwidth" in window._bandwidth_combo.toolTip() or "RFBW" in window._bandwidth_combo.toolTip()
+    tooltip = window._bandwidth_combo.toolTip()
+    assert "RF Bandwidth" in tooltip or "RFBW" in tooltip
     assert "AFBW" in window._afbw_combo.toolTip() or "Audio" in window._afbw_combo.toolTip()
     assert "AGC" in window._agc_check.toolTip() or "Automatic" in window._agc_check.toolTip()
     assert "SQL" in window._squelch_check.toolTip() or "Squelch" in window._squelch_check.toolTip()

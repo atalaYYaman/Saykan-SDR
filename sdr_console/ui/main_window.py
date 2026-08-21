@@ -17,10 +17,8 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMainWindow,
     QMessageBox,
-    QPushButton,
     QScrollArea,
     QSizePolicy,
     QSlider,
@@ -59,7 +57,6 @@ from sdr_console.dsp.squelch import (
 from sdr_console.hal.discovery import scan_devices
 from sdr_console.hal.interface import SDRDeviceInterface
 from sdr_console.hal.registry import (
-    DEVICE_CHOICES,
     MOCK_DEVICE_ID,
     PLUTO_DEVICE_ID,
     create_device,
@@ -89,10 +86,17 @@ from sdr_console.ui.connect_worker import ConnectWorker
 from sdr_console.ui.detection_panel import DEFAULT_DETECTION_THRESHOLD_DB, DetectionPanel
 from sdr_console.ui.devices import clamp_config_to_capabilities, device_create_kwargs
 from sdr_console.ui.feature_host import FeaturePanelHost
-from sdr_console.ui.hover_drawer import HoverDrawer
-from sdr_console.ui.panel_toolbar import PanelToolBar
 from sdr_console.ui.scan_panel import ScanPanel
+from sdr_console.ui.shell_panel import (
+    create_df_shell,
+    create_ea_deceive_shell,
+    create_ea_gnss_shell,
+    create_ea_jam_shell,
+    create_geoloc_shell,
+    create_params_shell,
+)
 from sdr_console.ui.theme import apply_application_theme
+from sdr_console.ui.transport_toolbar import TransportToolBar
 from sdr_console.ui.tx_panel import TxPanel
 from sdr_console.viz.sdr_display import SdrDisplayWidget
 from sdr_console.viz.settings import DisplaySettings
@@ -249,6 +253,12 @@ class MainWindow(QMainWindow):
         )
         self._scan_panel = ScanPanel(sample_rate_hz=self._config.sample_rate_hz)
         self._tx_panel = TxPanel()
+        self._df_panel = create_df_shell()
+        self._geoloc_panel = create_geoloc_shell()
+        self._params_panel = create_params_shell()
+        self._ea_jam_panel = create_ea_jam_shell()
+        self._ea_deceive_panel = create_ea_deceive_shell()
+        self._ea_gnss_panel = create_ea_gnss_shell()
         self._tx_device: TXCapableDevice | None = None
         self._tx_loop_active = False
         self._pipeline = self._build_pipeline()
@@ -379,39 +389,14 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
 
-        transport_host = QWidget()
-        transport_host.setObjectName("toolbar_main")
-        transport_row = QHBoxLayout(transport_host)
-        transport_row.setContentsMargins(12, 6, 12, 6)
-        transport_row.setSpacing(8)
-        self._device_combo = QComboBox()
-        self._device_combo.setObjectName("transport_device")
-        for device_id, label in DEVICE_CHOICES:
-            self._device_combo.addItem(label, device_id)
-
-        self._uri_edit = QLineEdit()
-        self._uri_edit.setObjectName("transport_uri")
-        self._uri_edit.setPlaceholderText("auto / ip:192.168.2.1 / usb:")
-        self._uri_edit.setMinimumWidth(180)
+        self._transport_toolbar = TransportToolBar(self)
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self._transport_toolbar)
+        self._device_combo = self._transport_toolbar.device_combo
+        self._uri_edit = self._transport_toolbar.uri_edit
+        self._scan_button = self._transport_toolbar.scan_button
+        self._start_button = self._transport_toolbar.start_button
+        self._stop_button = self._transport_toolbar.stop_button
         self._uri_edit.setText(self._config.device_uri)
-
-        self._scan_button = QPushButton("Scan")
-        self._scan_button.setObjectName("transport_scan")
-        self._start_button = QPushButton("Start")
-        self._start_button.setObjectName("transport_start")
-        self._stop_button = QPushButton("Stop")
-        self._stop_button.setObjectName("transport_stop")
-        self._stop_button.setEnabled(False)
-
-        transport_row.addWidget(QLabel("Device:"))
-        transport_row.addWidget(self._device_combo)
-        transport_row.addWidget(QLabel("URI:"))
-        transport_row.addWidget(self._uri_edit)
-        transport_row.addWidget(self._scan_button)
-        transport_row.addWidget(self._start_button)
-        transport_row.addWidget(self._stop_button)
-        transport_row.addStretch()
-        root.addWidget(transport_host)
 
         self._receiver_box = CollapsibleGroupBox("Receiver")
         self._receiver_box.setObjectName("group_receiver")
@@ -650,14 +635,20 @@ class MainWindow(QMainWindow):
         self._main_layout.addWidget(self._controls_scroll, stretch=0)
         self._main_layout.addWidget(self._display, stretch=1)
 
-        self._hover_drawer = HoverDrawer()
         self._feature_host = FeaturePanelHost(
             [
-                ("dock_detection", self._detection_panel),
-                ("dock_scan", self._scan_panel),
-                ("dock_tx", self._tx_panel),
+                ("dock_detection", self._detection_panel, True),
+                ("dock_scan", self._scan_panel, True),
+                ("dock_df", self._df_panel, False),
+                ("dock_geoloc", self._geoloc_panel, False),
+                ("dock_params", self._params_panel, False),
+                ("dock_tx", self._tx_panel, True),
+                ("dock_ea_jam", self._ea_jam_panel, False),
+                ("dock_ea_deceive", self._ea_deceive_panel, False),
+                ("dock_ea_gnss", self._ea_gnss_panel, False),
             ]
         )
+        self._panel_toolbar = self._feature_host.tab_bar
         self._panel_docks = [
             self._detection_panel,
             self._scan_panel,
@@ -667,11 +658,9 @@ class MainWindow(QMainWindow):
         self._content_row = QHBoxLayout()
         self._content_row.setContentsMargins(0, 0, 0, 0)
         self._content_row.setSpacing(0)
-        self._content_row.addWidget(self._hover_drawer)
         self._content_row.addWidget(self._main_column, stretch=1)
         self._content_row.addWidget(self._feature_host)
         root.addLayout(self._content_row, stretch=1)
-        self._setup_feature_panels()
         self._feature_host.visibility_changed.connect(self._on_feature_panels_changed)
 
         self._status_label = QLabel("Idle")
@@ -686,14 +675,10 @@ class MainWindow(QMainWindow):
 
         for box in (self._receiver_box, self._audio_box, self._display_box):
             box.toggled.connect(self._on_control_panel_toggled)
+        self._audio_box.set_expanded(False)
+        self._display_box.set_expanded(False)
 
         self._update_gain_mode_visibility()
-
-    def _setup_feature_panels(self) -> None:
-        """Tespit / Tarama / TX görünürlük kutularını hover çekmeceye yerleştir."""
-        self._panel_toolbar = PanelToolBar(self._feature_host)
-        self._hover_drawer.add_panel(self._panel_toolbar)
-        self._hover_drawer.content_layout().addStretch()
 
     def _persist_window_state(self) -> None:
         """Dock/toolbar yerleşimini config'e yaz (QMainWindow.saveState)."""
@@ -718,8 +703,14 @@ class MainWindow(QMainWindow):
             logger.warning("Failed to restore window_state; using default dock layout")
 
     def _on_control_panel_toggled(self, _expanded: bool = True) -> None:
-        """Üstteki Receiver/Audio/Display satırı daralınca waterfall alanı büyüsün."""
-        for box in (self._receiver_box, self._audio_box, self._display_box):
+        """Receiver/Audio/Display daralınca waterfall büyüsün; son açık panel kapanmasın."""
+        boxes = (self._receiver_box, self._audio_box, self._display_box)
+        if not any(box.is_expanded() for box in boxes):
+            sender = self.sender()
+            restore = sender if isinstance(sender, CollapsibleGroupBox) else self._receiver_box
+            restore.set_expanded(True)
+            return
+        for box in boxes:
             box.adjustSize()
         self._controls_column.adjustSize()
         self._controls_scroll.updateGeometry()
@@ -1407,6 +1398,7 @@ class MainWindow(QMainWindow):
         if self._audio_requested:
             self._start_audio()
         self._status_label.setText(self._streaming_status_text())
+        self._sync_toolbar_badges()
 
     def _on_connect_failed(self, message: str) -> None:
         self._status_label.setText(f"Connect failed: {message}")
@@ -1418,6 +1410,7 @@ class MainWindow(QMainWindow):
             self._device.disconnect()
         except Exception:
             pass
+        self._sync_toolbar_badges()
 
     def _on_connect_finished(self) -> None:
         self._connecting = False
@@ -1444,6 +1437,7 @@ class MainWindow(QMainWindow):
         self._scan_button.setEnabled(True)
         self._detection_panel.clear()
         self._status_label.setText("Idle")
+        self._sync_toolbar_badges()
 
     def _on_pipeline_error(self, message: str) -> None:
         # Called from acquisition thread — marshal to GUI thread.
@@ -1907,6 +1901,18 @@ class MainWindow(QMainWindow):
             self._status_label.setText(self._streaming_status_text())
         else:
             self._status_label.setText("Idle")
+        self._sync_toolbar_badges()
+
+    def _sync_toolbar_badges(self) -> None:
+        """ED Online only with live RX; ET Active only with real TX."""
+        toolbar = getattr(self, "_transport_toolbar", None)
+        if toolbar is None:
+            return
+        toolbar.set_ed_online(self._pipeline.is_running)
+        if self._tx_panel.is_transmitting() or self._tx_loop_active:
+            toolbar.set_et_state("active")
+        else:
+            toolbar.set_et_state("standby")
 
     def _capture_config_from_ui(self) -> None:
         self._config.device_id = self._device_combo.currentData()
@@ -1987,6 +1993,7 @@ class MainWindow(QMainWindow):
             confirm_text += f"\nAralık: {interval_s:.2f} s"
         confirm_text += "\n\nYayına devam edilsin mi?"
 
+        self._transport_toolbar.set_et_state("armed")
         reply = QMessageBox.question(
             self,
             "TX onayı",
@@ -1996,6 +2003,7 @@ class MainWindow(QMainWindow):
         )
         if reply != QMessageBox.StandardButton.Yes:
             self._tx_panel.set_status_message("Yayın iptal edildi.")
+            self._sync_toolbar_badges()
             return
 
         self._retune_to_frequency(freq_hz)
@@ -2008,14 +2016,17 @@ class MainWindow(QMainWindow):
         except TXError as exc:
             self._release_tx_device()
             self._tx_panel.set_status_message(f"TX hata: {exc}")
+            self._sync_toolbar_badges()
             return
         except Exception as exc:
             self._release_tx_device()
             self._tx_panel.set_status_message(f"TX hata: {exc}")
+            self._sync_toolbar_badges()
             return
 
         self._tx_loop_active = loop
         self._tx_panel.set_transmitting(True)
+        self._sync_toolbar_badges()
         if not self._fire_tx_burst():
             return
         self._tx_idle_timer.start()
@@ -2109,6 +2120,7 @@ class MainWindow(QMainWindow):
         self._release_tx_device()
         self._tx_panel.set_transmitting(False)
         self._tx_panel.set_status_message("Yayın durdu.")
+        self._sync_toolbar_badges()
 
     def _on_tx_gap_elapsed(self) -> None:
         if not self._tx_loop_active:
@@ -2123,6 +2135,7 @@ class MainWindow(QMainWindow):
         self._tx_idle_timer.stop()
         self._release_tx_device()
         self._tx_panel.set_transmitting(False)
+        self._sync_toolbar_badges()
 
     def _release_tx_device(self) -> None:
         device = self._tx_device

@@ -27,7 +27,7 @@ from sdr_console.dsp.squelch import (
 from sdr_console.hal.registry import MOCK_DEVICE_ID, is_known_device_id
 
 CONFIG_VERSION = 5
-WINDOW_LAYOUT_VERSION = 5
+WINDOW_LAYOUT_VERSION = 7
 DEFAULT_DEVICE_ID = MOCK_DEVICE_ID
 DEFAULT_DEMOD_MODE = "AM"
 DEFAULT_CHANNEL_BANDWIDTH_HZ = default_bandwidth_hz(DEFAULT_DEMOD_MODE)

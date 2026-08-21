@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from PyQt6.QtWidgets import QLabel, QScrollArea
 
 from sdr_console.config.app_config import AppConfig
 from sdr_console.ui.main_window import MainWindow
@@ -55,34 +56,42 @@ def test_two_visible_panels_split_the_right_area(shown_window: MainWindow, qtbot
     assert shown_window._scan_panel.height() > 40
 
 
-def test_receiver_is_fixed_and_toggles_live_in_hover_drawer(
+def test_receiver_is_fixed_and_panel_tabs_live_on_the_host(
     shown_window: MainWindow,
 ) -> None:
-    drawer = shown_window._hover_drawer
     assert shown_window._receiver_box.isVisible()
     assert shown_window._audio_box.isVisible()
     assert shown_window._display_box.isVisible()
-    assert not drawer.isAncestorOf(shown_window._receiver_box)
-    assert not drawer.isAncestorOf(shown_window._audio_box)
-    assert not drawer.isAncestorOf(shown_window._display_box)
-    assert drawer.isAncestorOf(shown_window._panel_toolbar)
-    assert not drawer.is_expanded()
+    assert shown_window._feature_host.isAncestorOf(shown_window._panel_toolbar)
+    assert shown_window._panel_toolbar.isVisible()
 
 
-def test_hiding_all_panels_expands_central_display(shown_window: MainWindow, qtbot) -> None:
-    width_with_host = shown_window._display.width()
+def test_hiding_all_panels_keeps_tab_bar_so_they_can_reopen(
+    shown_window: MainWindow, qtbot
+) -> None:
+    host = shown_window._feature_host
+    assert host.isVisible()
 
-    for name in shown_window._feature_host.panel_names():
+    for name in host.panel_names():
         action = shown_window._panel_toolbar.toggle_action_for(name)
         if action.isChecked():
             action.trigger()
 
     qtbot.waitUntil(
-        lambda: not shown_window._feature_host.isVisible(),
+        lambda: not host.is_panel_visible("dock_detection")
+        and not host.is_panel_visible("dock_scan")
+        and not host.is_panel_visible("dock_tx"),
         timeout=2000,
     )
-    assert shown_window._display.isVisible()
-    assert shown_window._display.width() >= width_with_host
+    assert host.isVisible()
+    assert shown_window._panel_toolbar.isVisible()
+    empty = host.findChild(QLabel, "feature_host_empty")
+    assert empty is not None and empty.isVisible()
+
+    shown_window._panel_toolbar.toggle_action_for("dock_detection").trigger()
+    qtbot.waitUntil(lambda: host.is_panel_visible("dock_detection"), timeout=2000)
+    assert shown_window._detection_panel.isVisible()
+    assert host.isVisible()
 
 
 def test_reopening_panel_via_toolbar_restores_visibility(shown_window: MainWindow) -> None:
@@ -96,7 +105,7 @@ def test_reopening_panel_via_toolbar_restores_visibility(shown_window: MainWindo
 
 
 def test_all_registered_panels_have_toolbar_short_labels(shown_window: MainWindow) -> None:
-    from sdr_console.ui.panel_toolbar import DOCK_SHORT_LABELS
+    from sdr_console.ui.panel_ids import DOCK_SHORT_LABELS
 
     for name in shown_window._feature_host.panel_names():
         assert name in DOCK_SHORT_LABELS
@@ -125,7 +134,6 @@ def test_receiver_audio_display_sit_side_by_side_above_waterfall(
 
 def test_hiding_a_panel_gives_remaining_panels_the_column(shown_window: MainWindow, qtbot) -> None:
     host = shown_window._feature_host
-    height_with_three = shown_window._scan_panel.height()
 
     shown_window._panel_toolbar.toggle_action_for("dock_detection").trigger()
     shown_window._panel_toolbar.toggle_action_for("dock_tx").trigger()
@@ -138,13 +146,16 @@ def test_hiding_a_panel_gives_remaining_panels_the_column(shown_window: MainWind
 
     assert host.isVisible()
     assert shown_window._scan_panel.isVisible()
-    assert shown_window._scan_panel.height() > height_with_three
-    assert shown_window._scan_panel.height() >= int(host.height() * 0.7)
+    viewport_h = host.findChild(QScrollArea, "feature_host_scroll")
+    assert viewport_h is not None
+    assert shown_window._scan_panel.height() >= int(viewport_h.viewport().height() * 0.7)
 
 
 def test_audio_and_receiver_controls_stay_inside_their_frames(
     shown_window: MainWindow,
 ) -> None:
+    shown_window._audio_box.set_expanded(True)
+    shown_window._display_box.set_expanded(True)
     audio_box = shown_window._audio_box
     for widget in (
         shown_window._audio_check,
