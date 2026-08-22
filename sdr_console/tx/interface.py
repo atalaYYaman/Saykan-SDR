@@ -15,6 +15,10 @@ class TXCapableDevice(ABC):
         """TX merkez frekansını Hz cinsinden ayarla."""
 
     @abstractmethod
+    def set_min_attenuation_db(self, min_attenuation_db: float) -> None:
+        """Bu örnek için attenuation tabanını ayarla (varsayılan TX/Test: 40 dB)."""
+
+    @abstractmethod
     def set_tx_attenuation_db(self, attenuation_db: float) -> None:
         """TX attenuation'ı dB cinsinden ayarla (yüksek = daha zayıf yayın)."""
 

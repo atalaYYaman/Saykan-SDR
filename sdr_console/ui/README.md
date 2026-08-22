@@ -15,12 +15,13 @@ Ana pencere, Start/Stop, cihaz seçimi, frekans/kazanç/sample rate kontrolleri.
 - Transport — `TransportToolBar` (`QToolBar#toolbar_main`): cihaz, URI, Scan,
   Start, Stop ve ED/ET/GNSS/saat rozetleri.
 - Sağ host — `FeaturePanelHost` üstünde ED/ET sekme şeridi; NOW paneller
-  (Tespit/Tarama/TX) açık, SHELL paneller empty-state ve varsayılan gizli.
+  (Tespit/Tarama/TX) açık, Karıştırma baraj demosu ET sekmesinden açılır,
+  diğer SHELL paneller empty-state ve varsayılan gizli.
 - Tespit tablosu — NOW kolonlar + gizli SHELL kolon yuvaları (`—`);
   sağ tık: Dinle / Locate (disabled) / Assign ET (disabled).
 
-**Bağımlılık yönü:** ui → viz, pipeline, hal, config, demod (factory). DSP'ye
-doğrudan erişim yasak.
+**Bağımlılık yönü:** ui → viz, pipeline, hal, config, demod (factory), tx, ea.
+DSP'ye doğrudan erişim yasak.
 
 ## Dock panel sistemi
 
@@ -33,7 +34,7 @@ Ana pencere `QMainWindow` dock düzenini kullanır:
 | Panel host | `feature_host.py` | ED/ET sekmeler (her zaman görünür) + kaydırılabilir paneller |
 | Sekme şeridi | `panel_toolbar.py` | Tespit/Tarama/DF/… görünür toggle |
 | SHELL | `shell_panel.py` | Şartname yuvaları, sahte veri yok |
-| Panel widget'ları | `detection_panel.py`, `scan_panel.py`, `tx_panel.py`, … | İş mantığı + Qt widget |
+| Panel widget'ları | `detection_panel.py`, `scan_panel.py`, `tx_panel.py`, `jam_panel.py`, … | İş mantığı + Qt widget |
 
 **Varsayılan yerleşim:**
 - Sol sabit: Receiver / Audio / Display

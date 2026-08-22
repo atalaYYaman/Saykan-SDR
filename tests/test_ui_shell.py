@@ -8,6 +8,7 @@ import pytest
 from PyQt6.QtWidgets import QComboBox, QLineEdit
 
 from sdr_console.config.app_config import AppConfig
+from sdr_console.ui.jam_panel import JamPanel
 from sdr_console.ui.main_window import MainWindow
 from sdr_console.ui.shell_panel import ShellPanel
 
@@ -26,7 +27,9 @@ def test_shell_panels_start_hidden_with_empty_copy(window: MainWindow) -> None:
     assert window._df_panel.empty_text() == "DF bağlı değil"
     assert window._geoloc_panel.empty_text() == "Konum kaynağı yok"
     assert window._params_panel.empty_text() == "Tespit seçin"
-    assert window._ea_jam_panel.empty_text() == "Karıştırma modülü bağlı değil"
+    assert isinstance(window._ea_jam_panel, JamPanel)
+    assert window._ea_jam_panel.note_text() == "Baraj demosu — onaylı kısa yayın"
+    assert not window._ea_jam_panel._lookthrough.isEnabled()
     assert window._ea_deceive_panel.empty_text() == "Aldatma modülü bağlı değil"
     assert window._ea_gnss_panel.empty_text() == "GNSS aldatma bağlı değil"
     assert not window._df_panel.isVisible()

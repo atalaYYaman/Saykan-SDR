@@ -76,6 +76,19 @@ def test_overlay_follows_the_selected_channel(display: SdrDisplayWidget) -> None
         assert high_hz == pytest.approx(CENTER_HZ + 300_000.0 + 62_500.0)
 
 
+def test_jam_band_hidden_until_set(display: SdrDisplayWidget) -> None:
+    for overlay in display._jam_overlays:
+        assert not overlay.region.isVisible()
+    display.set_jam_band(ChannelSpec(CENTER_HZ, 500_000.0))
+    for overlay in display._jam_overlays:
+        assert overlay.region.isVisible()
+        low_hz, high_hz = overlay.region.getRegion()
+        assert high_hz - low_hz == pytest.approx(500_000.0)
+    display.clear_jam_band()
+    for overlay in display._jam_overlays:
+        assert not overlay.region.isVisible()
+
+
 def test_setting_the_channel_programmatically_does_not_emit_channel_moved(
     display: SdrDisplayWidget,
     qtbot,

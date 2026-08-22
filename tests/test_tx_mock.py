@@ -58,6 +58,24 @@ def test_constructor_rejects_attenuation_below_limit() -> None:
         MockTXDevice(attenuation_db=20.0)
 
 
+def test_jam_floor_allows_ten_db() -> None:
+    from sdr_console.tx.constants import ABSOLUTE_MIN_ATTENUATION_DB
+
+    device = MockTXDevice(
+        attenuation_db=ABSOLUTE_MIN_ATTENUATION_DB,
+        min_attenuation_db=ABSOLUTE_MIN_ATTENUATION_DB,
+    )
+    assert device.attenuation_db == pytest.approx(ABSOLUTE_MIN_ATTENUATION_DB)
+    device.set_tx_attenuation_db(15.0)
+    assert device.attenuation_db == pytest.approx(15.0)
+
+
+def test_floor_cannot_go_below_absolute_minimum() -> None:
+    device = MockTXDevice()
+    with pytest.raises(TXAttenuationLimitError):
+        device.set_min_attenuation_db(9.0)
+
+
 def test_set_tx_bandwidth_is_stored() -> None:
     device = MockTXDevice()
     device.set_tx_bandwidth_hz(25_000.0)

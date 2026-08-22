@@ -1,5 +1,9 @@
 """TX güvenlik sınırları ve varsayılanlar."""
 
+# Mutlak taban: hiçbir TX yolu (EA jam dahil) bundan güçlü olamaz.
+# TX/Test varsayılanı aşağıda MIN_TX_ATTENUATION_DB ile 40 dB kalır.
+ABSOLUTE_MIN_ATTENUATION_DB = 10.0
+
 # tx_hardwaregain_chan0 bu değerden güçlü (daha pozitif) olamaz; örn. -30 dB reddedilir.
 MAX_TX_GAIN_DB = -40.0
 

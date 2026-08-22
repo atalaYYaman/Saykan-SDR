@@ -23,8 +23,17 @@ class BandOverlay:
         plot_item: pg.PlotItem,
         settings: DisplaySettings | None = None,
         movable: bool = True,
+        *,
+        fill_color: str | None = None,
+        fill_alpha: int | None = None,
+        line_color: str | None = None,
+        show_center: bool = True,
     ) -> None:
         self._settings = settings or DisplaySettings()
+        self._fill_color_override = fill_color
+        self._fill_alpha_override = fill_alpha
+        self._line_color_override = line_color
+        self._show_center = bool(show_center)
 
         self._region = pg.LinearRegionItem(values=(0.0, 0.0), movable=movable)
         self._region.setZValue(20)
@@ -33,6 +42,7 @@ class BandOverlay:
 
         self._center_line = pg.InfiniteLine(angle=90, movable=False)
         self._center_line.setZValue(21)
+        self._center_line.setVisible(self._show_center)
 
         self._apply_settings(self._settings)
 
@@ -43,6 +53,10 @@ class BandOverlay:
     def region(self) -> pg.LinearRegionItem:
         """Underlying region item; connect to its signals for drag events."""
         return self._region
+
+    def set_visible(self, visible: bool) -> None:
+        self._region.setVisible(bool(visible))
+        self._center_line.setVisible(bool(visible) and self._show_center)
 
     def set_channel(self, channel: ChannelSpec) -> None:
         """Move the box and center marker onto ``channel``."""
@@ -59,11 +73,18 @@ class BandOverlay:
         self._apply_settings(settings)
 
     def _apply_settings(self, settings: DisplaySettings) -> None:
-        fill = QColor(settings.channel_fill_color)
-        fill.setAlpha(settings.channel_fill_alpha)
+        fill_hex = self._fill_color_override or settings.channel_fill_color
+        fill_alpha = (
+            self._fill_alpha_override
+            if self._fill_alpha_override is not None
+            else settings.channel_fill_alpha
+        )
+        line_hex = self._line_color_override or settings.channel_fill_color
+        fill = QColor(fill_hex)
+        fill.setAlpha(int(fill_alpha))
         self._region.setBrush(pg.mkBrush(fill))
 
-        edge_pen = pg.mkPen(QColor(settings.channel_fill_color), width=1)
+        edge_pen = pg.mkPen(QColor(line_hex), width=1)
         for line in self._region.lines:
             line.setPen(edge_pen)
 

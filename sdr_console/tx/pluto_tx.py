@@ -18,11 +18,16 @@ from sdr_console.tx.constants import (
     DEFAULT_TX_BANDWIDTH_HZ,
     LOOPBACK_DIGITAL,
     LOOPBACK_OFF,
+    MIN_TX_ATTENUATION_DB,
     TX_FULL_SCALE,
     TX_MUTE_ATTENUATION_DB,
 )
 from sdr_console.tx.interface import TXCapableDevice
-from sdr_console.tx.mock_tx import _resolve_max_duration, _validate_attenuation
+from sdr_console.tx.mock_tx import (
+    _resolve_max_duration,
+    _validate_attenuation,
+    _validate_min_attenuation_db,
+)
 from sdr_console.tx.waveform import analog_tx_rf_bandwidth_hz, clamp_bandwidth_hz
 
 logger = logging.getLogger(__name__)
@@ -43,6 +48,7 @@ class PlutoTXDevice(TXCapableDevice):
         shared_sdr: Any | None = None,
         shared_lock: threading.RLock | None = None,
         loopback_while_tx: bool = False,
+        min_attenuation_db: float = MIN_TX_ATTENUATION_DB,
     ) -> None:
         if tx_buffer_size <= 0:
             raise ValueError("tx_buffer_size must be positive")
@@ -55,7 +61,11 @@ class PlutoTXDevice(TXCapableDevice):
 
         self._tx_freq_hz = float(tx_freq_hz)
         self._sample_rate_hz = float(sample_rate_hz)
-        self._attenuation_db = _validate_attenuation(attenuation_db)
+        self._min_attenuation_db = _validate_min_attenuation_db(min_attenuation_db)
+        self._attenuation_db = _validate_attenuation(
+            attenuation_db,
+            min_attenuation_db=self._min_attenuation_db,
+        )
         self._uri = uri.strip()
         self._tx_buffer_size = int(tx_buffer_size)
         self._full_scale = float(full_scale)
@@ -170,9 +180,16 @@ class PlutoTXDevice(TXCapableDevice):
             if self._sdr is not None:
                 self._sdr.tx_lo = int(self._tx_freq_hz)
 
-    def set_tx_attenuation_db(self, attenuation_db: float) -> None:
-        attenuation = _validate_attenuation(attenuation_db)
+    def set_min_attenuation_db(self, min_attenuation_db: float) -> None:
         with self._lock:
+            self._min_attenuation_db = _validate_min_attenuation_db(min_attenuation_db)
+
+    def set_tx_attenuation_db(self, attenuation_db: float) -> None:
+        with self._lock:
+            attenuation = _validate_attenuation(
+                attenuation_db,
+                min_attenuation_db=self._min_attenuation_db,
+            )
             self._attenuation_db = attenuation
             if self._sdr is not None:
                 self._sdr.tx_hardwaregain_chan0 = -self._attenuation_db

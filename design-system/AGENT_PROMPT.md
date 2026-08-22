@@ -86,11 +86,9 @@ ED (5.1) — bilgi; spektrumu boğmasın:
   (dock_params). NOW’da VFO + BW yeter; ekstra alanlar boş.
 
 ET (5.2) — ayrı tehlikeli bölge; ED’den görsel olarak ayrıl (kırmızı token yalnızca burada + Stop):
-- dock_tx (NOW Replay) ET host içinde sekme/bölüm olarak kalsın; yanına SHELL sekmeler:
-  - Sürekli karıştırma (5.2.1): tekli / çoklu / baraj tipi yuvası; süre + operatör
-    start/stop; almaç gerekmez notu. Teknik kontrol: bant boyunca RF çıkış UI kontrolü.
-  - Arabakışlı karıştırma (5.2.2): tespit↔karıştırma zaman paylaşımı; look-through
-    spektrum yuvası. Komite penceresi dışında aktif edilemez kilit yuvası.
+- dock_tx (NOW Replay) ET host içinde sekme/bölüm olarak kalsın; yanına:
+  - Karıştırma (`dock_ea_jam`) baraj NOW-tohumu: bant gürültüsü, onay +
+    yetkili pencere, att ≥ 10 dB, süre ≤ 15 s. Tekli/çoklu/look-through SHELL.
   - Analog aldatma (5.2.3): Replay/NOW ile akraba; ses/dalga şekli yuvası.
   - GNSS aldatma (5.2.4): en az GPS L1 geçer; L2/L5, GLONASS, Galileo, BDS ilave.
     Servis checkbox SHELL. Karıştırma ile birlikte/sonra/bağımsız notu.

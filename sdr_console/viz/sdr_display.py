@@ -9,7 +9,11 @@ from sdr_console.dsp.channel import ChannelSpec
 from sdr_console.dsp.frame import SpectrumFrame
 from sdr_console.pipeline.sample_queue import SampleQueue
 from sdr_console.viz.band_overlay import BandOverlay
-from sdr_console.viz.settings import DisplaySettings
+from sdr_console.viz.settings import (
+    DisplaySettings,
+    ET_BAND_FILL,
+    ET_BAND_FILL_ALPHA,
+)
 from sdr_console.viz.spectrum_widget import SpectrumWidget
 from sdr_console.viz.waterfall_widget import WaterfallWidget
 
@@ -64,6 +68,29 @@ class SdrDisplayWidget(QWidget):
             BandOverlay(self._spectrum.getPlotItem(), self._settings),
             BandOverlay(self._waterfall.getPlotItem(), self._settings),
         )
+        self._jam_overlays = (
+            BandOverlay(
+                self._spectrum.getPlotItem(),
+                self._settings,
+                movable=False,
+                fill_color=ET_BAND_FILL,
+                fill_alpha=ET_BAND_FILL_ALPHA,
+                line_color=ET_BAND_FILL,
+                show_center=False,
+            ),
+            BandOverlay(
+                self._waterfall.getPlotItem(),
+                self._settings,
+                movable=False,
+                fill_color=ET_BAND_FILL,
+                fill_alpha=ET_BAND_FILL_ALPHA,
+                line_color=ET_BAND_FILL,
+                show_center=False,
+            ),
+        )
+        for jam_overlay in self._jam_overlays:
+            jam_overlay.set_visible(False)
+            jam_overlay.region.setZValue(19)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -78,6 +105,17 @@ class SdrDisplayWidget(QWidget):
             overlay.region.sigRegionChanged.connect(self._on_overlay_dragged)
 
         self.set_channel(self._channel)
+
+    def set_jam_band(self, channel: ChannelSpec | None) -> None:
+        """ET baraj bandını göster; ``None`` gizler (sahte spektrum yok)."""
+        visible = channel is not None
+        for overlay in self._jam_overlays:
+            overlay.set_visible(visible)
+            if channel is not None:
+                overlay.set_channel(channel)
+
+    def clear_jam_band(self) -> None:
+        self.set_jam_band(None)
 
     @property
     def settings(self) -> DisplaySettings:
@@ -102,6 +140,8 @@ class SdrDisplayWidget(QWidget):
         self._waterfall.set_display_settings(settings)
         for overlay in self._overlays:
             overlay.set_display_settings(settings)
+        for jam_overlay in self._jam_overlays:
+            jam_overlay.set_display_settings(settings)
 
     def set_channel(self, channel: ChannelSpec) -> None:
         """Move the overlay box onto ``channel`` without re-emitting signals."""

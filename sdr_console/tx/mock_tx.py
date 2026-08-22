@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 
 from sdr_console.tx.constants import (
+    ABSOLUTE_MIN_ATTENUATION_DB,
     DEFAULT_MAX_TX_DURATION_S,
     DEFAULT_TX_ATTENUATION_DB,
     DEFAULT_TX_BANDWIDTH_HZ,
@@ -17,13 +18,27 @@ from sdr_console.tx.errors import TXAttenuationLimitError
 from sdr_console.tx.interface import TXCapableDevice
 
 
-def _validate_attenuation(attenuation_db: float) -> float:
+def _validate_min_attenuation_db(min_attenuation_db: float) -> float:
+    floor = float(min_attenuation_db)
+    if floor < ABSOLUTE_MIN_ATTENUATION_DB:
+        raise TXAttenuationLimitError(
+            f"TX attenuation tabanı {floor:.1f} dB mutlak sınırın altında; "
+            f"minimum {ABSOLUTE_MIN_ATTENUATION_DB:.1f} dB gerekli."
+        )
+    return floor
+
+
+def _validate_attenuation(
+    attenuation_db: float,
+    min_attenuation_db: float = MIN_TX_ATTENUATION_DB,
+) -> float:
+    floor = _validate_min_attenuation_db(min_attenuation_db)
     attenuation = float(attenuation_db)
-    if attenuation < MIN_TX_ATTENUATION_DB:
+    if attenuation < floor:
         raise TXAttenuationLimitError(
             f"TX attenuation {attenuation:.1f} dB güvenlik sınırının altında; "
-            f"minimum {MIN_TX_ATTENUATION_DB:.1f} dB gerekli "
-            f"(tx_hardwaregain_chan0 <= {MIN_TX_ATTENUATION_DB:.1f} dB zayıf)."
+            f"minimum {floor:.1f} dB gerekli "
+            f"(tx_hardwaregain_chan0 <= {floor:.1f} dB zayıf)."
         )
     return attenuation
 
@@ -44,9 +59,14 @@ class MockTXDevice(TXCapableDevice):
         self,
         tx_freq_hz: float = 433_920_000.0,
         attenuation_db: float = DEFAULT_TX_ATTENUATION_DB,
+        min_attenuation_db: float = MIN_TX_ATTENUATION_DB,
     ) -> None:
         self._tx_freq_hz = float(tx_freq_hz)
-        self._attenuation_db = _validate_attenuation(attenuation_db)
+        self._min_attenuation_db = _validate_min_attenuation_db(min_attenuation_db)
+        self._attenuation_db = _validate_attenuation(
+            attenuation_db,
+            min_attenuation_db=self._min_attenuation_db,
+        )
         self._bandwidth_hz = float(DEFAULT_TX_BANDWIDTH_HZ)
         self._lock = threading.RLock()
         self._is_transmitting = False
@@ -86,9 +106,16 @@ class MockTXDevice(TXCapableDevice):
         with self._lock:
             self._tx_freq_hz = float(freq_hz)
 
+    def set_min_attenuation_db(self, min_attenuation_db: float) -> None:
+        with self._lock:
+            self._min_attenuation_db = _validate_min_attenuation_db(min_attenuation_db)
+
     def set_tx_attenuation_db(self, attenuation_db: float) -> None:
         with self._lock:
-            self._attenuation_db = _validate_attenuation(attenuation_db)
+            self._attenuation_db = _validate_attenuation(
+                attenuation_db,
+                min_attenuation_db=self._min_attenuation_db,
+            )
 
     def set_tx_bandwidth_hz(self, bandwidth_hz: float) -> None:
         if bandwidth_hz <= 0:

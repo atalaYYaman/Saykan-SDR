@@ -8,10 +8,8 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QGroupBox,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -143,29 +141,6 @@ class ParamsShellPanel(ShellPanel):
 
 def create_params_shell() -> ParamsShellPanel:
     return ParamsShellPanel()
-
-
-def create_ea_jam_shell() -> ShellPanel:
-    panel = ShellPanel("Karıştırma", "Karıştırma modülü bağlı değil")
-    jam_type = QComboBox()
-    jam_type.addItems(["Tekli", "Çoklu", "Baraj"])
-    start = QPushButton("Start")
-    stop = QPushButton("Stop")
-    lookthrough = QCheckBox("Komite penceresi / look-through")
-    note = QLabel("Almaç gerekmez (sürekli). Arabakışlı kip almaç ister.")
-    note.setWordWrap(True)
-    _disabled(jam_type, start, stop, lookthrough)
-    row = QWidget()
-    row_layout = QHBoxLayout(row)
-    row_layout.setContentsMargins(0, 0, 0, 0)
-    row_layout.addWidget(jam_type)
-    row_layout.addWidget(start)
-    row_layout.addWidget(stop)
-    panel.body_layout().addWidget(row)
-    panel.body_layout().addWidget(lookthrough)
-    panel.body_layout().addWidget(note)
-    panel.body_layout().addStretch()
-    return panel
 
 
 def create_ea_deceive_shell() -> ShellPanel:

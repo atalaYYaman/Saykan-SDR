@@ -288,6 +288,16 @@ SHELL durumları **sahte geçiş animasyonu çizmez**; renk ayrımı token adın
 - Space / tek tık TX **yasak**
 - Waveform: mevcut noise/tone; Replay dosyası SHELL (`dock_ea_deceive`)
 
+#### `dock_ea_jam` — Karıştırma (baraj NOW-tohum)
+
+- ET host içinde TX’in yanında; varsayılan gizli, sekmeden açılır
+- Onay diyaloğu + **yetkili test penceresi** checkbox zorunlu
+- Attenuation ≥ 10 dB (TX/Test 40 dB ayrı kalır); süre ≤ 15 s; sonsuz TX yok
+- Waveform: bant gürültüsü (CW yok); işgal ≤ sample rate
+- Tip: Baraj kilitli; Tekli/Çoklu ve look-through SHELL (disabled)
+- Spektrum: kırmızı baraj bandı yalnız ET Active iken
+- **Yasak** sahte jam spektrumu, hop-takip, Space kısayolu
+
 ### 4.4 Ortak bileşenler
 
 **Primary button (Start):** bg `#06B6D4`, text `#0F172A`, radius 4 px, min 72×28 px  
@@ -355,11 +365,13 @@ Her kayıt: `objectName`, bölge, empty-state, ileride bağlanacağı sinyal, **
 | Alan | Değer |
 |------|-------|
 | Bölge | ET host — “Karıştırma” sekmesi |
-| Empty-state | **“Karıştırma modülü bağlı değil”** |
-| UI yuvası | Sürekli: tekli/çoklu/baraj tip seçimi; süre; start/stop; “Almaç gerekmez” notu |
-| Look-through (5.2.2) | Alt bölüm: tespit↔jam zaman çizelgesi yuvası; mini spektrum; **komite penceresi kilidi** checkbox (disabled) |
-| Bağlantı | `dock_detection` Assign ET; TX HAL |
-| **Yasak** | Sahte jam spektrumu, “aktif jam” göstergesi backend olmadan |
+| NOW-tohum | Baraj demosu: onaylı bant gürültüsü, attenuation ≥ 10 dB, süre ≤ 15 s |
+| Empty / not | “Baraj demosu — onaylı kısa yayın” (modül bağlı) |
+| UI yuvası | Tip Baraj kilitli; frekans; baraj BW; attenuation; süre; Start/Stop |
+| Look-through (5.2.2) | Checkbox **disabled** SHELL |
+| Tekli / Çoklu | Combo görünür, disabled |
+| Bağlantı | TX HAL (`PlutoTXDevice` / Mock); tespit frekans kopyası |
+| **Yasak** | Sahte jam spektrumu; hop-takip; TX/Test 40 dB tabanını indirme |
 
 ### 5.5 `dock_ea_deceive` (5.2.3)
 

@@ -54,6 +54,9 @@ from sdr_console.dsp.squelch import (
     MAX_SQUELCH_THRESHOLD_DB,
     MIN_SQUELCH_THRESHOLD_DB,
 )
+from sdr_console.ea.constants import MIN_JAM_ATTENUATION_DB
+from sdr_console.ea.errors import JamError
+from sdr_console.ea.session import JamSession
 from sdr_console.hal.discovery import scan_devices
 from sdr_console.hal.interface import SDRDeviceInterface
 from sdr_console.hal.registry import (
@@ -75,7 +78,11 @@ from sdr_console.scan.controller import (
     ScanResult,
     compute_scan_centers,
 )
-from sdr_console.tx.constants import DEFAULT_MAX_TX_DURATION_S, pluto_duplex_spectrum_hint
+from sdr_console.tx.constants import (
+    DEFAULT_MAX_TX_DURATION_S,
+    MIN_TX_ATTENUATION_DB,
+    pluto_duplex_spectrum_hint,
+)
 from sdr_console.tx.errors import TXError
 from sdr_console.tx.interface import TXCapableDevice
 from sdr_console.tx.mock_tx import MockTXDevice
@@ -85,13 +92,14 @@ from sdr_console.ui.collapsible import CollapsibleGroupBox
 from sdr_console.ui.connect_worker import ConnectWorker
 from sdr_console.ui.detection_panel import DEFAULT_DETECTION_THRESHOLD_DB, DetectionPanel
 from sdr_console.ui.devices import clamp_config_to_capabilities, device_create_kwargs
+from sdr_console.ui.ea_confirm_dialog import EaConfirmDialog
 from sdr_console.ui.feature_host import FeaturePanelHost
+from sdr_console.ui.jam_panel import JamPanel
 from sdr_console.ui.scan_panel import ScanPanel
 from sdr_console.ui.shell_panel import (
     create_df_shell,
     create_ea_deceive_shell,
     create_ea_gnss_shell,
-    create_ea_jam_shell,
     create_geoloc_shell,
     create_params_shell,
 )
@@ -256,11 +264,12 @@ class MainWindow(QMainWindow):
         self._df_panel = create_df_shell()
         self._geoloc_panel = create_geoloc_shell()
         self._params_panel = create_params_shell()
-        self._ea_jam_panel = create_ea_jam_shell()
+        self._ea_jam_panel = JamPanel()
         self._ea_deceive_panel = create_ea_deceive_shell()
         self._ea_gnss_panel = create_ea_gnss_shell()
         self._tx_device: TXCapableDevice | None = None
         self._tx_loop_active = False
+        self._jam_session = JamSession()
         self._pipeline = self._build_pipeline()
         self._channel = self._channel_from_config()
         self._display = self._create_display()
@@ -283,6 +292,7 @@ class MainWindow(QMainWindow):
         self._tx_gap_timer.timeout.connect(self._on_tx_gap_elapsed)
         self._sync_tx_backend_label()
         self._sync_duplex_sample_rate_hint()
+        self._sync_jam_bandwidth_cap()
 
         if self._status_warning:
             self._status_label.setText(self._status_warning)
@@ -799,6 +809,9 @@ class MainWindow(QMainWindow):
         self._tx_panel.oneshot_requested.connect(self._on_tx_oneshot_requested)
         self._tx_panel.loop_requested.connect(self._on_tx_loop_requested)
         self._tx_panel.stop_requested.connect(self._on_tx_stop_requested)
+        self._ea_jam_panel.start_requested.connect(self._on_jam_start_requested)
+        self._ea_jam_panel.stop_requested.connect(self._on_jam_stop_requested)
+        self._ea_jam_panel.copy_detection_requested.connect(self._on_jam_copy_detection)
         self._scan_bridge.progress.connect(self._apply_scan_progress)
         self._scan_bridge.finished.connect(self._finish_scan)
         self._scan_bridge.step_peaks.connect(self._publish_scan_detection_state)
@@ -1521,6 +1534,7 @@ class MainWindow(QMainWindow):
         self._update_device_availability_ui()
         self._sync_tx_backend_label()
         self._sync_duplex_sample_rate_hint()
+        self._sync_jam_bandwidth_cap()
 
         available, reason = device_availability(device_id)
         if available:
@@ -1641,6 +1655,7 @@ class MainWindow(QMainWindow):
             return
         self._sync_display_tuning()
         self._scan_panel.set_sample_rate_hz(float(rate))
+        self._sync_jam_bandwidth_cap()
         # The audio rate follows the sample rate, so the stream must be reopened.
         self._restart_audio_if_running()
         self._set_idle_or_streaming_status()
@@ -1919,6 +1934,8 @@ class MainWindow(QMainWindow):
         toolbar.set_ed_online(self._pipeline.is_running)
         if self._tx_panel.is_transmitting() or self._tx_loop_active:
             toolbar.set_et_state("active")
+        elif self._ea_jam_panel.is_transmitting() or self._jam_session.is_active:
+            toolbar.set_et_state("active")
         else:
             toolbar.set_et_state("standby")
 
@@ -1955,9 +1972,13 @@ class MainWindow(QMainWindow):
         if self._active_device_id == PLUTO_DEVICE_ID:
             uri = self._config.device_uri.strip()
             suffix = f" ({uri})" if uri else ""
-            self._tx_panel.set_backend_label(f"Donanım: ADALM-Pluto TX{suffix}")
+            label = f"Donanım: ADALM-Pluto TX{suffix}"
+            self._tx_panel.set_backend_label(label)
+            self._ea_jam_panel.set_backend_label(label)
             return
-        self._tx_panel.set_backend_label("Simülasyon: Mock TX (gerçek RF yok)")
+        mock_label = "Simülasyon: Mock TX (gerçek RF yok)"
+        self._tx_panel.set_backend_label(mock_label)
+        self._ea_jam_panel.set_backend_label(mock_label)
 
     def _sync_duplex_sample_rate_hint(self) -> None:
         """Pluto'da Sample rate satırına eşzamanlı RX+TX spektrum tavanını yaz."""
@@ -1972,6 +1993,12 @@ class MainWindow(QMainWindow):
         self._sample_rate_label.setText("Sample rate")
         self._sample_rate_label.setToolTip("")
 
+    def _sync_jam_bandwidth_cap(self) -> None:
+        rate = self._current_sample_rate()
+        if rate is None:
+            rate = float(self._device.sample_rate_hz)
+        self._ea_jam_panel.set_max_bandwidth_hz(float(rate))
+
     def _on_tx_oneshot_requested(self) -> None:
         self._start_test_tx(loop=False)
 
@@ -1980,6 +2007,11 @@ class MainWindow(QMainWindow):
 
     def _start_test_tx(self, *, loop: bool) -> None:
         if self._tx_panel.is_transmitting() or self._tx_loop_active:
+            return
+        if self._ea_jam_panel.is_transmitting() or self._jam_session.is_active:
+            self._tx_panel.set_status_message(
+                "Karıştırma yayını sürüyor; TX/Test kapalı."
+            )
             return
 
         duration_s = min(self._tx_panel.duration_s(), DEFAULT_MAX_TX_DURATION_S)
@@ -2080,11 +2112,24 @@ class MainWindow(QMainWindow):
             return False
         return True
 
-    def _create_tx_device(self) -> TXCapableDevice:
+    def _create_tx_device(
+        self,
+        *,
+        freq_hz: float | None = None,
+        att: float | None = None,
+        bandwidth_hz: float | None = None,
+        min_attenuation_db: float = MIN_TX_ATTENUATION_DB,
+        loopback: bool | None = None,
+    ) -> TXCapableDevice:
         self._release_tx_device()
-        freq = self._tx_panel.tx_freq_hz()
-        att = self._tx_panel.attenuation_db()
-        bandwidth_hz = self._tx_panel.bandwidth_hz()
+        freq = float(self._tx_panel.tx_freq_hz() if freq_hz is None else freq_hz)
+        attenuation = float(self._tx_panel.attenuation_db() if att is None else att)
+        occupied = float(
+            self._tx_panel.bandwidth_hz() if bandwidth_hz is None else bandwidth_hz
+        )
+        loopback_on = (
+            self._tx_panel.loopback_enabled() if loopback is None else bool(loopback)
+        )
         if self._active_device_id == PLUTO_DEVICE_ID:
             shared = getattr(self._device, "iio_backend", None)
             lock = getattr(self._device, "iio_lock", None)
@@ -2092,12 +2137,13 @@ class MainWindow(QMainWindow):
             device: TXCapableDevice = PlutoTXDevice(
                 tx_freq_hz=freq,
                 sample_rate_hz=self._device.sample_rate_hz,
-                attenuation_db=att,
+                attenuation_db=attenuation,
                 uri=self._config.device_uri,
-                bandwidth_hz=bandwidth_hz,
+                bandwidth_hz=occupied,
                 shared_sdr=shared if use_shared else None,
                 shared_lock=lock if use_shared else None,
-                loopback_while_tx=self._tx_panel.loopback_enabled(),
+                loopback_while_tx=loopback_on,
+                min_attenuation_db=min_attenuation_db,
             )
             if not bool(getattr(device, "is_connected", False)):
                 connect = getattr(device, "connect", None)
@@ -2105,14 +2151,118 @@ class MainWindow(QMainWindow):
                     connect()
             self._tx_device = device
             return device
-        mock = MockTXDevice(tx_freq_hz=freq, attenuation_db=att)
-        mock.set_tx_bandwidth_hz(bandwidth_hz)
+        mock = MockTXDevice(
+            tx_freq_hz=freq,
+            attenuation_db=attenuation,
+            min_attenuation_db=min_attenuation_db,
+        )
+        mock.set_tx_bandwidth_hz(occupied)
         self._tx_device = mock
         return mock
 
     def _on_tx_stop_requested(self) -> None:
         self._stop_tx_transmission()
         self._tx_panel.set_status_message("Yayın durduruldu.")
+
+    def _on_jam_start_requested(self) -> None:
+        if self._ea_jam_panel.is_transmitting() or self._jam_session.is_active:
+            return
+        if self._tx_panel.is_transmitting() or self._tx_loop_active:
+            self._ea_jam_panel.set_status_message(
+                "TX/Test yayını sürüyor; karıştırma kapalı."
+            )
+            return
+
+        freq_hz = self._ea_jam_panel.tx_freq_hz()
+        att = self._ea_jam_panel.attenuation_db()
+        bandwidth_hz = self._ea_jam_panel.bandwidth_hz()
+        duration_s = self._ea_jam_panel.duration_s()
+
+        self._transport_toolbar.set_et_state("armed")
+        accepted = EaConfirmDialog.ask(
+            freq_hz=freq_hz,
+            bandwidth_hz=bandwidth_hz,
+            duration_s=duration_s,
+            attenuation_db=att,
+            parent=self,
+        )
+        if not accepted:
+            self._ea_jam_panel.set_status_message("Yayın iptal edildi.")
+            self._sync_toolbar_badges()
+            return
+
+        self._retune_to_frequency(freq_hz)
+        try:
+            device = self._create_tx_device(
+                freq_hz=freq_hz,
+                att=att,
+                bandwidth_hz=bandwidth_hz,
+                min_attenuation_db=MIN_JAM_ATTENUATION_DB,
+                loopback=self._ea_jam_panel.loopback_enabled(),
+            )
+            sample_rate = float(
+                getattr(device, "sample_rate_hz", None) or self._device.sample_rate_hz
+            )
+            set_loopback = getattr(device, "set_loopback_while_tx", None)
+            if callable(set_loopback):
+                set_loopback(self._ea_jam_panel.loopback_enabled())
+            self._jam_session.start(
+                device,
+                sample_rate_hz=sample_rate,
+                freq_hz=freq_hz,
+                bandwidth_hz=bandwidth_hz,
+                attenuation_db=att,
+                duration_s=duration_s,
+                confirmed=True,
+                authorized_window=True,
+            )
+        except (TXError, JamError) as exc:
+            self._jam_session.stop()
+            self._release_tx_device()
+            self._ea_jam_panel.set_status_message(f"Karıştırma hata: {exc}")
+            self._sync_toolbar_badges()
+            return
+        except Exception as exc:
+            self._jam_session.stop()
+            self._release_tx_device()
+            self._ea_jam_panel.set_status_message(f"Karıştırma hata: {exc}")
+            self._sync_toolbar_badges()
+            return
+
+        self._ea_jam_panel.set_transmitting(True)
+        self._display.set_jam_band(ChannelSpec(freq_hz, bandwidth_hz))
+        self._sync_toolbar_badges()
+        self._tx_idle_timer.start()
+        suffix = ""
+        if self._active_device_id == PLUTO_DEVICE_ID and not self._pipeline.is_running:
+            suffix = " Waterfall için Start ile RX açın."
+        elif self._ea_jam_panel.loopback_enabled():
+            suffix = " Çip içi loopback — RF değil."
+        else:
+            suffix = " RF baraj; RX antenle dinliyor."
+        self._ea_jam_panel.set_status_message("Baraj yayını başladı." + suffix)
+
+    def _on_jam_stop_requested(self) -> None:
+        self._finish_jam("Baraj yayını durduruldu.")
+
+    def _on_jam_copy_detection(self) -> None:
+        freqs = self._detection_panel.selected_frequencies_hz()
+        if not freqs:
+            self._ea_jam_panel.set_status_message("Tespit seçin.")
+            return
+        self._ea_jam_panel.set_freq_hz(freqs[0])
+        self._ea_jam_panel.set_status_message(
+            f"Tespit kopyalandı: {freqs[0] / 1_000_000.0:.3f} MHz"
+        )
+
+    def _finish_jam(self, message: str) -> None:
+        self._tx_idle_timer.stop()
+        self._jam_session.stop()
+        self._release_tx_device()
+        self._ea_jam_panel.set_transmitting(False)
+        self._ea_jam_panel.set_status_message(message)
+        self._display.clear_jam_band()
+        self._sync_toolbar_badges()
 
     def _poll_tx_idle(self) -> None:
         device = self._tx_device
@@ -2123,6 +2273,9 @@ class MainWindow(QMainWindow):
             self._tx_idle_timer.stop()
             self._tx_panel.set_status_message("Aralık bekleniyor…")
             self._tx_gap_timer.start(interval_ms)
+            return
+        if self._jam_session.is_active or self._ea_jam_panel.is_transmitting():
+            self._finish_jam("Baraj yayını durdu.")
             return
         self._tx_idle_timer.stop()
         self._release_tx_device()
@@ -2141,8 +2294,11 @@ class MainWindow(QMainWindow):
         self._tx_loop_active = False
         self._tx_gap_timer.stop()
         self._tx_idle_timer.stop()
+        self._jam_session.stop()
         self._release_tx_device()
         self._tx_panel.set_transmitting(False)
+        self._ea_jam_panel.set_transmitting(False)
+        self._display.clear_jam_band()
         self._sync_toolbar_badges()
 
     def _release_tx_device(self) -> None:
